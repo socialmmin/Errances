@@ -54,7 +54,7 @@ export function RevenueChart({ data }: RevenueChartProps) {
                                             boxShadow: '0 4px 15px rgba(0, 0, 0, 0.05)',
                                             fontSize: '12px'
                                         }}
-                                        formatter={(value: number | undefined) => [value ? `€${value.toLocaleString()}` : '€0', 'Revenue']}
+                                        formatter={(value: any) => [value ? `€${Number(value).toLocaleString()}` : '€0', 'Revenue']}
                                     />
                                 </PieChart>
                             </ResponsiveContainer>

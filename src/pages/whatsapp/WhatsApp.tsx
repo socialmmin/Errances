@@ -14,7 +14,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { useAppStore } from '@/store';
-import { supabase, anonClient } from '@/lib/supabase';
+import { supabase, anonClient, API_BASE, getAuthToken } from '@/lib/supabase';
 
 import type { Lead } from '@/types';
 
@@ -258,22 +258,13 @@ export function WhatsApp() {
         }
     };
 
-    // Twilio message sync function
+    // Twilio message sync function (fetched via our backend, which holds the Twilio credentials)
     const syncTwilioMessages = async (showToast = false) => {
-        const accountSid = import.meta.env.VITE_TWILIO_ACCOUNT_SID;
-        const authToken = import.meta.env.VITE_TWILIO_AUTH_TOKEN;
-        
-        if (!accountSid || !authToken) {
-            if (showToast) toast.error('Twilio credentials not configured in environment variables');
-            return;
-        }
-
         if (showToast) toast.info('Syncing WhatsApp messages from Twilio...');
         try {
-            const res = await fetch(`/twilio-api/2010-04-01/Accounts/${accountSid}/Messages.json?PageSize=1000`, {
-                headers: {
-                    'Authorization': `Basic ${btoa(`${accountSid}:${authToken}`)}`
-                }
+            const token = getAuthToken();
+            const res = await fetch(`${API_BASE}/api/whatsapp/twilio-messages`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
             });
             if (!res.ok) {
                 throw new Error('Failed to fetch from Twilio: ' + res.statusText);
@@ -284,13 +275,13 @@ export function WhatsApp() {
             const phoneToMsgs: Record<string, any[]> = {};
             twilioMessages.forEach((msg: any) => {
                 if (!msg.from.startsWith('whatsapp:') || !msg.to.startsWith('whatsapp:')) return;
-                
+
                 const fromNum = msg.from.replace('whatsapp:', '');
                 const toNum = msg.to.replace('whatsapp:', '');
-                
-                const ourNum = import.meta.env.VITE_TWILIO_WHATSAPP_NUMBER || '';
+
+                const ourNum = data.ourNumber || '';
                 const cleanOurNum = ourNum.replace('whatsapp:', '').trim();
-                
+
                 const otherNum = (fromNum === cleanOurNum) ? toNum : fromNum;
                 
                 if (!phoneToMsgs[otherNum]) {
@@ -315,7 +306,7 @@ export function WhatsApp() {
             for (const [phone, msgs] of Object.entries(phoneToMsgs)) {
                 const normalizedSearch = phone.replace(/\D/g, '');
                 
-                let matchingLead = dbLeads.find(l => {
+                let matchingLead = dbLeads.find((l: any) => {
                     if (!l.phone) return false;
                     const cleanLeadPhone = l.phone.replace(/\D/g, '');
                     return cleanLeadPhone === normalizedSearch || 
@@ -397,7 +388,7 @@ export function WhatsApp() {
                     const isUser = tMsg.direction.startsWith('outbound');
                     const sender = isUser ? 'user' : 'contact';
                     
-                    const msgExists = dbMsgs.some(dm => 
+                    const msgExists = dbMsgs.some((dm: any) =>
                         dm.content === tMsg.body && 
                         Math.abs(new Date(dm.created_at).getTime() - new Date(tMsg.date_created).getTime()) < 10000
                     );
@@ -643,7 +634,7 @@ export function WhatsApp() {
             if (!error && data) {
                 setDbError(false);
                 const mapping: Record<string, { content: string, created_at: string }> = {};
-                data.forEach(m => {
+                data.forEach((m: any) => {
                     if (!mapping[m.lead_id]) {
                         mapping[m.lead_id] = { content: m.content, created_at: m.created_at };
                     }
@@ -830,7 +821,7 @@ export function WhatsApp() {
                 console.log('[WhatsApp Debug] fetchMessages result:', { count: data?.length, error });
                 if (!error && data) {
                     setDbError(false);
-                    setMessages(data.map(m => ({
+                    setMessages(data.map((m: any) => ({
                         id: m.id,
                         content: m.content,
                         sender: m.sender as 'user' | 'contact',

@@ -15,15 +15,15 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/twilio-api': {
-        target: 'https://api.twilio.com',
+      '/api': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:4000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/twilio-api/, ''),
       },
-      '/whatsapp-api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true
-      }
+      '/socket.io': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:4000',
+        changeOrigin: true,
+        ws: true,
+      },
     }
   }
 })

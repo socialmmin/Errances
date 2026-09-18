@@ -224,7 +224,7 @@ export function LeadAnalyticsTab() {
                                                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{payload[0].name}</p>
                                                                 <div className="flex items-baseline gap-2">
                                                                     <span className="text-2xl font-black text-slate-900 leading-none">{payload[0].value}</span>
-                                                                    <span className="text-xs font-bold text-slate-500">({Math.round((payload[0].value / analytics.totalLeads) * 100)}%)</span>
+                                                                    <span className="text-xs font-bold text-slate-500">({Math.round((Number(payload[0].value) / (analytics?.totalLeads || 1)) * 100)}%)</span>
                                                                 </div>
                                                             </div>
                                                         </div>

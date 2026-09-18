@@ -28,8 +28,13 @@ dist-ssr
 .env.*
 !.env.example
 
+# Backend
+backend/node_modules
+backend/dist
+auth_info_baileys/
+backend/auth_info_baileys/
+
 # Temporary & Local files
-supabase/.temp/
 scratch/
 delete-leads-direct.js
 get-messaging-services.js

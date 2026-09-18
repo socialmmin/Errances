@@ -154,7 +154,7 @@ export function StaffDetails() {
                     .eq('lead_id', member.id)
                     .order('created_at', { ascending: true });
                 if (!error && data) {
-                    setMessages(data.map(m => ({
+                    setMessages(data.map((m: any) => ({
                         id: m.id,
                         content: m.content,
                         sender: m.sender as 'user' | 'contact',

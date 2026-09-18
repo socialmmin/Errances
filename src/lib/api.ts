@@ -1,4 +1,4 @@
-import { supabase, anonClient } from './supabase';
+import { supabase, anonClient, API_BASE, getAuthToken } from './supabase';
 import type { Lead, TourPackage } from '@/types';
 
 
@@ -36,7 +36,7 @@ export async function createLead(lead: Partial<Lead>) {
                 .select('*');
             
             if (existingLeads) {
-                const matchingDeletedLead = existingLeads.find(l => {
+                const matchingDeletedLead = existingLeads.find((l: any) => {
                     if (!l.phone || l.notes !== '[DELETED]') return false;
                     const cleanExistingPhone = l.phone.replace(/\D/g, '');
                     return cleanExistingPhone === cleanPhone || 
@@ -338,31 +338,25 @@ export async function deleteStaff(id: string) {
 // --- WHATSAPP ---
 
 export async function sendWhatsAppMessage(
-    to: string, 
-    message: string, 
-    contentSid?: string, 
+    to: string,
+    message: string,
+    contentSid?: string,
     contentVariables?: Record<string, string>
 ) {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key';
-    
-    // Get the current session if available to use the authenticated JWT
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token || supabaseAnonKey;
+    const token = getAuthToken();
 
-    const response = await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+    const response = await fetch(`${API_BASE}/api/whatsapp/send`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'apikey': supabaseAnonKey,
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ to, message, contentSid, contentVariables }),
     });
 
     if (!response.ok) {
         const errText = await response.text();
-        let errMsg = 'Failed to invoke send-whatsapp function';
+        let errMsg = 'Failed to send WhatsApp message';
         try {
             const errObj = JSON.parse(errText);
             errMsg = errObj.error || errObj.message || errMsg;
@@ -395,21 +389,15 @@ export async function updateWhatsAppMessage(id: string, content: string) {
 }
 
 export async function triggerBirthdayWishesCheck() {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key';
-    
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token || supabaseAnonKey;
+    const token = getAuthToken();
 
     try {
-        const response = await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+        const response = await fetch(`${API_BASE}/api/whatsapp/birthday-check`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'apikey': supabaseAnonKey,
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
             },
-            body: JSON.stringify({ action: 'check_birthdays' }),
         });
 
         if (!response.ok) {

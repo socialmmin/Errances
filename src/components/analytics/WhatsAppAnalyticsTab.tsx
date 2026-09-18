@@ -31,15 +31,15 @@ export function WhatsAppAnalyticsTab() {
 
                 if (data) {
                     setDbError(false);
-                    const sent = data.filter(m => m.sender === 'user');
-                    const received = data.filter(m => m.sender === 'contact');
+                    const sent = data.filter((m: any) => m.sender === 'user');
+                    const received = data.filter((m: any) => m.sender === 'contact');
                     setSentCount(sent.length);
                     setReceivedCount(received.length);
 
                     // Simple delivery rate calculation (sent vs delivered/read)
                     const totalSent = sent.length;
                     if (totalSent > 0) {
-                        const deliveredOrRead = sent.filter(m => m.status === 'delivered' || m.status === 'read').length;
+                        const deliveredOrRead = sent.filter((m: any) => m.status === 'delivered' || m.status === 'read').length;
                         setDeliveryRate(Math.round((deliveredOrRead / totalSent) * 100));
                     }
 
@@ -53,7 +53,7 @@ export function WhatsAppAnalyticsTab() {
                         };
                     });
 
-                    data.forEach(m => {
+                    data.forEach((m: any) => {
                         const mDateStr = format(new Date(m.created_at), 'yyyy-MM-dd');
                         const dayObj = last7Days.find(d => d.dateStr === mDateStr);
                         if (dayObj) {
