@@ -2,13 +2,14 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User } from '@/types';
 import { useAppStore } from '@/store';
 import { supabase } from '@/lib/supabase';
-import { verifyStaffCredentials } from '@/lib/api';
+import { registerStaff, type RegisterPayload } from '@/lib/api';
 
 interface AuthContextType {
     user: User | null;
     loading: boolean;
-    signIn: (email: string, password?: string) => Promise<void>;
+    signIn: (identifier: string, password: string, rememberMe?: boolean) => Promise<void>;
     signOut: () => Promise<void>;
+    register: (payload: RegisterPayload) => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,48 +21,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         let mounted = true;
 
-        // Check active session
         const initAuth = async () => {
-            try {
-                // Create a timeout promise
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Auth timeout')), 2000)
-                );
-
-                // Race between getSession and timeout
-                const { data: { session }, error } = await Promise.race([
-                    supabase.auth.getSession(),
-                    timeoutPromise
-                ]) as any;
-
-                if (error) throw error;
-                if (mounted) await handleUserSession(session);
-            } catch (error) {
-                console.warn('Auth initialization session check failed:', error);
-
-                // Fallback: Check for custom staff session
-                const staffSessionStr = localStorage.getItem('staff_session');
-                if (staffSessionStr && mounted) {
-                    try {
-                        const profile = JSON.parse(staffSessionStr);
-                        setUser(profile as User);
-                        console.log('Restored custom staff session:', profile.email);
-                        // Eagerly fetch data for staff session
-                        fetchLeads();
-                        fetchTours();
-                    } catch (_) {
-                        localStorage.removeItem('staff_session');
-                    }
-                }
-            } finally {
-                if (mounted) setLoading(false);
-            }
+            const { data: { session } } = await supabase.auth.getSession();
+            if (mounted) await handleUserSession(session);
+            if (mounted) setLoading(false);
         };
 
         const {
             data: { subscription },
-        } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log('Auth state change:', event, session?.user?.email);
+        } = supabase.auth.onAuthStateChange(async (_event, session) => {
             if (mounted) {
                 await handleUserSession(session);
                 setLoading(false);
@@ -79,30 +47,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleUserSession = async (session: any) => {
         try {
             if (session?.user) {
-                // Fetch staff details
                 const { data: profile, error } = await supabase
                     .from('staffs')
                     .select('*')
                     .eq('id', session.user.id)
-                    .single();
+                    .maybeSingle();
 
-                if (error && error.code !== 'PGRST116') { // PGRST116 is "Row not found" (0 rows)
+                if (error) {
                     console.error('Error fetching profile:', error);
                 }
 
                 if (profile) {
                     setUser(profile as User);
+                    fetchLeads();
+                    fetchTours();
                 } else {
-                    // Fallback or create profile if missing
-                    console.log('Profile not found, using session metadata fallback');
-                    const fallbackUser: User = {
-                        id: session.user.id,
-                        email: session.user.email!,
-                        full_name: session.user.user_metadata.full_name || 'Admin',
-                        role: (session.user.email === 'admin@errnacesvoyages.com' || session.user.email?.startsWith('admin@')) ? 'admin' : 'sales_executive',
-                        avatar_url: session.user.user_metadata.avatar_url,
-                    };
-                    setUser(fallbackUser);
+                    setUser(null);
                 }
             } else {
                 setUser(null);
@@ -113,64 +73,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const signIn = async (email: string, password?: string) => {
-        if (password) {
-            try {
-                const { error } = await supabase.auth.signInWithPassword({
-                    email,
-                    password,
-                });
-                if (error) throw error;
-            } catch (authError: any) {
-                // If standard login fails, try custom staff verification
-                console.log('Supabase login failed, trying custom staff auth...');
-                const staffProfile = await verifyStaffCredentials(email, password);
+    const signIn = async (identifier: string, password: string, rememberMe = true) => {
+        const { error } = await supabase.auth.signInWithPassword({ identifier, password, rememberMe });
+        if (error) throw error;
+    };
 
-                if (staffProfile) {
-                    // Success! Store in AppStore and LocalStorage
-                    setUser(staffProfile as User);
-                    localStorage.setItem('staff_session', JSON.stringify(staffProfile));
-                    console.log('Custom staff login success:', email);
-                    // Eagerly fetch data since there's no Supabase session to trigger Layout's effect
-                    fetchLeads();
-                    fetchTours();
-                } else {
-                    // Both failed
-                    throw authError;
-                }
-            }
-        } else {
-            const { error } = await supabase.auth.signInWithOtp({
-                email,
-                options: {
-                    emailRedirectTo: window.location.origin,
-                },
-            });
-            if (error) throw error;
-            alert('Check your email for the login link!');
-        }
+    const register = async (payload: RegisterPayload) => {
+        const result = await registerStaff(payload);
+        return result.message;
     };
 
     const signOut = async () => {
-        console.log('AuthProvider: signOut initiated');
         try {
-            const { error } = await supabase.auth.signOut();
-            if (error) {
-                console.error('Supabase signout error:', error);
-            } else {
-                console.log('Supabase signout successful');
-            }
-        } catch (err) {
-            console.error('Signout failed unexpectedly:', err);
+            await supabase.auth.signOut();
         } finally {
-            console.log('AuthProvider: clearing user state');
-            localStorage.removeItem('staff_session');
             setUser(null);
         }
     };
 
     return (
-        <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+        <AuthContext.Provider value={{ user, loading, signIn, signOut, register }}>
             {children}
         </AuthContext.Provider>
     );

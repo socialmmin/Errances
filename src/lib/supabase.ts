@@ -11,7 +11,7 @@ import { io, type Socket } from 'socket.io-client';
 export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 export function getAuthToken(): string | null {
-    return localStorage.getItem('auth_token');
+    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
 }
 
 async function httpFetch(url: string, options: RequestInit = {}) {
@@ -155,8 +155,8 @@ type AuthListener = (event: string, session: Session | null) => void;
 const listeners = new Set<AuthListener>();
 
 function getStoredSession(): Session | null {
-    const token = localStorage.getItem('auth_token');
-    const userStr = localStorage.getItem('auth_user');
+    const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+    const userStr = localStorage.getItem('auth_user') || sessionStorage.getItem('auth_user');
     if (!token || !userStr) return null;
     try {
         const user = JSON.parse(userStr);
@@ -191,19 +191,23 @@ export const auth = {
         listeners.add(callback);
         return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } };
     },
-    async signInWithPassword({ email, password }: { email: string; password: string }) {
+    async signInWithPassword({ email, identifier, password, rememberMe = true }: { email?: string; identifier?: string; password: string; rememberMe?: boolean }) {
         try {
             const res = await fetch(`${API_BASE}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({ identifier: identifier ?? email, password }),
             });
             const json = await res.json().catch(() => ({}));
             if (!res.ok) {
-                return { error: { message: json.error || 'Invalid email or password' } };
+                return { error: { message: json.error || 'Invalid access key or password', code: json.code } };
             }
-            localStorage.setItem('auth_token', json.token);
-            localStorage.setItem('auth_user', JSON.stringify(json.user));
+            const storage = rememberMe ? localStorage : sessionStorage;
+            const other = rememberMe ? sessionStorage : localStorage;
+            other.removeItem('auth_token');
+            other.removeItem('auth_user');
+            storage.setItem('auth_token', json.token);
+            storage.setItem('auth_user', JSON.stringify(json.user));
             notify('SIGNED_IN', getStoredSession());
             return { error: null };
         } catch (err: any) {
@@ -216,6 +220,8 @@ export const auth = {
     async signOut() {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user');
+        sessionStorage.removeItem('auth_token');
+        sessionStorage.removeItem('auth_user');
         notify('SIGNED_OUT', null);
         return { error: null };
     },

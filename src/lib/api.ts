@@ -1,6 +1,28 @@
 import { supabase, anonClient, API_BASE, getAuthToken } from './supabase';
 import type { Lead, TourPackage } from '@/types';
 
+// --- AUTH ---
+
+export type RegisterPayload = {
+    full_name: string;
+    email: string;
+    phone?: string;
+    access_key: string;
+    password: string;
+};
+
+export async function registerStaff(payload: RegisterPayload) {
+    const response = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.error || 'Registration failed');
+    }
+    return data as { user: any; message: string };
+}
 
 // --- LEADS ---
 
@@ -255,30 +277,6 @@ export async function createStaff(user: any, _password?: string) {
     }
 
     return { data: staffData };
-}
-
-export async function verifyStaffCredentials(email: string, password: string) {
-    console.log('API: verifyStaffCredentials for', email);
-
-    // Sanitize input password (digits only)
-    const sanitizedPassword = password.replace(/\D/g, '');
-
-    const { data, error } = await supabase
-        .from('staffs')
-        .select('*')
-        .eq('email', email)
-        .single();
-
-    if (error || !data) return null;
-
-    // Check if phone matches (also sanitized)
-    const storedPassword = (data.phone || '').replace(/\D/g, '');
-
-    if (sanitizedPassword === storedPassword && storedPassword !== '') {
-        return data;
-    }
-
-    return null;
 }
 
 export async function updateStaff(id: string, updates: any) {

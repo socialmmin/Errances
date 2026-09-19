@@ -31,7 +31,7 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: authed,
     },
     staffs: {
-        columns: ['id', 'email', 'full_name', 'role', 'avatar_url', 'department', 'phone', 'status', 'password_hash', 'created_at'],
+        columns: ['id', 'email', 'access_key', 'full_name', 'role', 'avatar_url', 'department', 'phone', 'status', 'password_hash', 'created_at'],
         canRead: authed,
         canWrite: isAdmin,
         canDelete: isAdmin,

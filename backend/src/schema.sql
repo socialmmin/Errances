@@ -4,15 +4,27 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS staffs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
+    access_key TEXT UNIQUE,
     full_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'sales_manager', 'sales_executive', 'support')),
     avatar_url TEXT,
     department TEXT,
     phone TEXT,
-    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'pending')),
     password_hash TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent upgrades for tables created by earlier versions of this schema
+-- (safe to re-run on every boot; ALTER ... IF NOT EXISTS / DROP ... IF EXISTS
+-- are no-ops once applied).
+ALTER TABLE staffs ADD COLUMN IF NOT EXISTS access_key TEXT;
+DO $$ BEGIN
+    ALTER TABLE staffs ADD CONSTRAINT staffs_access_key_key UNIQUE (access_key);
+EXCEPTION WHEN duplicate_table THEN NULL; WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE staffs DROP CONSTRAINT IF EXISTS staffs_status_check;
+ALTER TABLE staffs ADD CONSTRAINT staffs_status_check CHECK (status IN ('active', 'inactive', 'pending'));
 
 -- Kept alongside `staffs` (legacy dual-table design used by the frontend for
 -- lead-assignment FK bookkeeping); mirrors a subset of staff columns.

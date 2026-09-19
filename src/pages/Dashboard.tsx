@@ -19,9 +19,26 @@ import { LeadForm } from '@/components/leads/LeadForm';
 import { v4 as uuidv4 } from 'uuid';
 import { useI18n } from '@/i18n';
 import { getLeadRevenue } from '@/lib/utils';
+import { useAuth } from '@/components/AuthProvider';
+
+const ROLE_LABELS: Record<string, string> = {
+    admin: 'Super Admin',
+    sales_manager: 'Sales Manager',
+    sales_executive: 'Sales Executive',
+    support: 'Support',
+};
+
+function useGreeting() {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+}
 
 export function Dashboard() {
     const { tours, addLead } = useAppStore();
+    const { user } = useAuth();
+    const greeting = useGreeting();
     const leads = useFilteredLeads();
     const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
     const { t, language, setLanguage } = useI18n();
@@ -128,8 +145,17 @@ export function Dashboard() {
         <div className="flex flex-col min-h-full gap-4">
             <div className="flex-none flex flex-col md:flex-row items-center justify-between gap-4 bg-white/40 backdrop-blur-md p-6 rounded-3xl border border-white/60 shadow-sm shadow-indigo-900/5">
                 <div>
-                    <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">{t('dashboard')}</h2>
-                    <p className="text-slate-500 font-medium">{t('overview')}</p>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">{t('dashboard')}</h2>
+                        {user?.role && (
+                            <span className="text-[9px] font-black uppercase tracking-widest text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1">
+                                {ROLE_LABELS[user.role] || user.role}
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-slate-500 font-medium">
+                        {greeting}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''} — {t('overview')}
+                    </p>
                 </div>
                 <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
                     <div

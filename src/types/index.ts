@@ -1,12 +1,13 @@
 export type User = {
     id: string;
     email: string;
+    access_key?: string;
     full_name: string;
     role: 'admin' | 'sales_manager' | 'sales_executive' | 'support';
     avatar_url?: string;
     department?: string;
     phone?: string;
-    status?: 'active' | 'inactive';
+    status?: 'active' | 'inactive' | 'pending';
     permissions?: string[];
 };
 
