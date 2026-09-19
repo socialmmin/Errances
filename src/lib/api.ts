@@ -111,6 +111,25 @@ export async function deleteLead(id: string) {
     if (error) throw error;
 }
 
+// --- FILE UPLOAD ---
+
+export async function uploadFile(file: File): Promise<string> {
+    const token = getAuthToken();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE}/api/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.error || 'Upload failed');
+    }
+    return data.url as string;
+}
+
 // --- TOURS ---
 
 export async function uploadTourImage(file: File) {

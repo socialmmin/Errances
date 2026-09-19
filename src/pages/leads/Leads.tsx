@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, Download, Upload } from 'lucide-react';
 import { toast } from '@/components/ui/Toast';
 import { LeadsTable } from '@/components/leads/LeadsTable';
+import { useLeadFilters } from '@/components/leads/LeadFiltersBar';
 import {
     Dialog,
     DialogContent,
@@ -17,15 +18,19 @@ import type { Lead } from '@/types';
 import { KPICards } from '@/components/dashboard/KPICards';
 import { useI18n } from '@/i18n';
 import { WhatsAppModal } from '@/components/leads/WhatsAppModal';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/lib/supabase';
 
 import { useFilteredLeads } from '@/hooks/useFilteredLeads';
 import { getLeadRevenue } from '@/lib/utils';
 import { parseCSVContent } from '@/lib/csvParser';
 
 export function Leads() {
-    const { fetchLeads, addLead, updateLead, deleteLead, tours } = useAppStore();
-    const leads = useFilteredLeads();
+    const { fetchLeads, addLead, updateLead, deleteLead, tours, fetchLeadStatuses, fetchFollowups, fetchStaff } = useAppStore();
+    const rawLeads = useFilteredLeads();
+    const { filtered: leads, FilterBar } = useLeadFilters(rawLeads, 'leads');
     const { t } = useI18n();
+    const navigate = useNavigate();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedLead, setSelectedLead] = useState<Lead | undefined>(undefined);
@@ -33,7 +38,10 @@ export function Leads() {
 
     useEffect(() => {
         fetchLeads();
-    }, [fetchLeads]);
+        fetchLeadStatuses();
+        fetchFollowups();
+        fetchStaff();
+    }, [fetchLeads, fetchLeadStatuses, fetchFollowups, fetchStaff]);
 
     // KPI calculation
     const kpis = useMemo(() => {
@@ -49,17 +57,24 @@ export function Leads() {
     }, [leads, tours, t]);
 
     const handleExport = () => {
-        const headers = ['Name', 'Email', 'Phone', 'Status', 'Source', 'Budget', 'Tour Interest'];
+        const headers = ['Lead ID', 'Name', 'Email', 'Phone', 'WhatsApp', 'DOB', 'Gender', 'Status', 'Priority', 'Source', 'Campaign', 'Budget', 'Tour Interest', 'Follow-up Date'];
         const csvContent = [
             headers.join(','),
             ...leads.map(lead => [
+                lead.lead_number || '',
                 `"${lead.name}"`,
                 lead.email,
                 lead.phone,
+                lead.whatsapp_number || '',
+                lead.dob || '',
+                lead.gender || '',
                 lead.status,
+                lead.priority || '',
                 lead.source,
+                lead.campaign || '',
                 lead.budget || '',
-                `"${lead.tour_interest || ''}"`
+                `"${lead.tour_interest || ''}"`,
+                lead.follow_up_date || '',
             ].join(','))
         ].join('\n');
 
@@ -73,9 +88,7 @@ export function Leads() {
         document.body.removeChild(link);
     };
 
-    const handleImportClick = () => {
-        fileInputRef.current?.click();
-    };
+    const handleImportClick = () => fileInputRef.current?.click();
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -106,7 +119,7 @@ export function Leads() {
                         budget: item.budget || 0,
                         tour_interest: item.tour_interest || '',
                         notes: item.notes || ''
-                    });
+                    } as Lead);
                     importedCount++;
                 }
 
@@ -149,6 +162,26 @@ export function Leads() {
         }
     };
 
+    const handleBulkStatus = async (ids: string[], status: string) => {
+        try {
+            await supabase.from('leads').update({ status }).in('id', ids);
+            toast.success(`Updated status for ${ids.length} leads`);
+            fetchLeads();
+        } catch {
+            toast.error('Failed to bulk-update status');
+        }
+    };
+
+    const handleBulkAssign = async (ids: string[], staffId: string | null) => {
+        try {
+            await supabase.from('leads').update({ assigned_staff_id: staffId }).in('id', ids);
+            toast.success(`Assigned ${ids.length} leads`);
+            fetchLeads();
+        } catch {
+            toast.error('Failed to bulk-assign leads');
+        }
+    };
+
     return (
         <div className="min-h-[calc(100vh-6rem)] flex flex-col gap-6 animate-in fade-in duration-500 pb-8">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white/40 backdrop-blur-md p-6 rounded-3xl border border-white/60 shadow-sm shadow-indigo-900/5">
@@ -171,22 +204,12 @@ export function Leads() {
                             accept=".csv,.json"
                             onChange={handleFileChange}
                         />
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 px-4 text-slate-600 hover:text-indigo-600 font-bold rounded-lg transition-colors"
-                            onClick={handleImportClick}
-                        >
+                        <Button variant="ghost" size="sm" className="h-9 px-4 text-slate-600 hover:text-indigo-600 font-bold rounded-lg transition-colors" onClick={handleImportClick}>
                             <Upload className="w-4 h-4 mr-2 opacity-70" />
                             {t('import')}
                         </Button>
                         <div className="w-px h-4 bg-slate-200/60 mx-1" />
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 px-4 text-slate-600 hover:text-indigo-600 font-bold rounded-lg transition-colors"
-                            onClick={handleExport}
-                        >
+                        <Button variant="ghost" size="sm" className="h-9 px-4 text-slate-600 hover:text-indigo-600 font-bold rounded-lg transition-colors" onClick={handleExport}>
                             <Download className="w-4 h-4 mr-2 opacity-70" />
                             {t('export')}
                         </Button>
@@ -196,19 +219,24 @@ export function Leads() {
 
             <KPICards kpis={kpis} />
 
+            <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-white/60 shadow-sm shadow-indigo-900/5 p-4">
+                {FilterBar}
+            </div>
+
             <div className="flex-1 mt-0">
-                <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
-                    <LeadsTable
-                        leads={leads}
-                        onEdit={handleEditLead}
-                        onDelete={handleDeleteLead}
-                        onWhatsApp={(lead) => setWhatsappLead(lead)}
-                    />
-                </div>
+                <LeadsTable
+                    leads={leads}
+                    onEdit={handleEditLead}
+                    onDelete={handleDeleteLead}
+                    onWhatsApp={(lead) => setWhatsappLead(lead)}
+                    onBulkStatus={handleBulkStatus}
+                    onBulkAssign={handleBulkAssign}
+                    storageKey="leads"
+                />
             </div>
 
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent>
+                <DialogContent className="max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>{selectedLead ? t('editLeadTitle') : t('addNewLeadTitle')}</DialogTitle>
                         <DialogDescription>
@@ -219,6 +247,7 @@ export function Leads() {
                         initialData={selectedLead}
                         onSubmit={handleSaveLead}
                         onCancel={() => setIsDialogOpen(false)}
+                        onViewExisting={(id) => { setIsDialogOpen(false); navigate(`/leads/${id}`); }}
                     />
                 </DialogContent>
             </Dialog>

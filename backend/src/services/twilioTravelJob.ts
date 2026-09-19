@@ -20,19 +20,23 @@ export async function checkAndSendTravelMessagesTwilio() {
     const results: any[] = [];
 
     for (const lead of leads) {
-        if (!lead.notes || !lead.phone || lead.notes === '[DELETED]') continue;
+        if (!lead.phone || lead.notes === '[DELETED]') continue;
 
-        let dobStr = '', departureStr = '', arrivalStr = '';
-        try {
-            const parsed = JSON.parse(lead.notes);
-            if (parsed) {
-                dobStr = parsed.dob || '';
-                departureStr = parsed.tour_departure || '';
-                arrivalStr = parsed.tour_arrival || '';
+        let dobStr = lead.dob ? new Date(lead.dob).toISOString().slice(0, 10) : '';
+        let departureStr = '', arrivalStr = '';
+        if (lead.notes) {
+            try {
+                const parsed = JSON.parse(lead.notes);
+                if (parsed) {
+                    dobStr = dobStr || parsed.dob || '';
+                    departureStr = parsed.tour_departure || '';
+                    arrivalStr = parsed.tour_arrival || '';
+                }
+            } catch {
+                // notes isn't JSON — ignore, dobStr from the real column (if any) still applies.
             }
-        } catch {
-            continue;
         }
+        if (!dobStr && !departureStr && !arrivalStr) continue;
 
         let existingMessages: any[] | null = null;
         const getExistingMessages = async () => {

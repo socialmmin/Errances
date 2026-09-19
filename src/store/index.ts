@@ -1,14 +1,17 @@
 import { create } from 'zustand';
-import type { Lead, TourPackage, User } from '@/types';
+import type { Lead, TourPackage, User, LeadStatusConfig, LeadActivity, LeadFollowup, LeadDocument, LeadPayment } from '@/types';
 import * as api from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { toast } from '@/components/ui/Toast';
+import { DEFAULT_LEAD_STATUSES } from '@/lib/leadUtils';
 
 interface AppState {
     user: User | null;
     leads: Lead[];
     tours: TourPackage[];
     staff: User[];
+    leadStatuses: LeadStatusConfig[];
+    followups: LeadFollowup[];
     isLoading: boolean;
 
     setUser: (user: User | null) => void;
@@ -17,6 +20,26 @@ interface AppState {
     addLead: (lead: Lead) => Promise<void>;
     updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
     deleteLead: (id: string) => Promise<void>;
+
+    fetchLeadStatuses: () => Promise<void>;
+    saveLeadStatus: (status: Partial<LeadStatusConfig> & { key: string; label: string }) => Promise<void>;
+    deleteLeadStatus: (id: string) => Promise<void>;
+
+    fetchFollowups: () => Promise<void>;
+    addFollowup: (followup: Partial<LeadFollowup>) => Promise<void>;
+    updateFollowup: (id: string, updates: Partial<LeadFollowup>) => Promise<void>;
+    deleteFollowup: (id: string) => Promise<void>;
+
+    fetchLeadActivities: (leadId: string) => Promise<LeadActivity[]>;
+    logLeadActivity: (leadId: string, type: string, description: string, metadata?: any) => Promise<void>;
+
+    fetchLeadDocuments: (leadId: string) => Promise<LeadDocument[]>;
+    addLeadDocument: (doc: Partial<LeadDocument>) => Promise<void>;
+    deleteLeadDocument: (id: string) => Promise<void>;
+
+    fetchLeadPayments: (leadId: string) => Promise<LeadPayment[]>;
+    addLeadPayment: (payment: Partial<LeadPayment>) => Promise<void>;
+    deleteLeadPayment: (id: string) => Promise<void>;
 
     fetchTours: () => Promise<void>;
     setTours: (tours: TourPackage[]) => void;
@@ -42,6 +65,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     leads: [],
     tours: [],
     staff: [],
+    leadStatuses: DEFAULT_LEAD_STATUSES,
+    followups: [],
     isLoading: false,
 
     setUser: (user) => set({ user }),
@@ -377,6 +402,185 @@ export const useAppStore = create<AppState>((set, get) => ({
             console.error('Failed to update WhatsApp message:', error);
             toast.error('Failed to update message');
             throw error;
+        }
+    },
+
+    // --- Lead pipeline configuration ---
+    fetchLeadStatuses: async () => {
+        try {
+            const { data, error } = await supabase.from('lead_statuses').select('*').order('sort_order', { ascending: true });
+            if (error) throw error;
+            if (data && data.length > 0) set({ leadStatuses: data });
+        } catch (error) {
+            console.error('Failed to fetch lead statuses:', error);
+        }
+    },
+    saveLeadStatus: async (status) => {
+        try {
+            if (status.id) {
+                const { data, error } = await supabase.from('lead_statuses').update(status).eq('id', status.id).select().single();
+                if (error) throw error;
+                set((state) => ({ leadStatuses: state.leadStatuses.map((s) => (s.id === data.id ? data : s)) }));
+            } else {
+                const { data, error } = await supabase.from('lead_statuses').insert([status]).select().single();
+                if (error) throw error;
+                set((state) => ({ leadStatuses: [...state.leadStatuses, data].sort((a, b) => a.sort_order - b.sort_order) }));
+            }
+            toast.success('Status saved');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to save status');
+            throw error;
+        }
+    },
+    deleteLeadStatus: async (id) => {
+        try {
+            await supabase.from('lead_statuses').delete().eq('id', id);
+            set((state) => ({ leadStatuses: state.leadStatuses.filter((s) => s.id !== id) }));
+            toast.success('Status removed');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to remove status');
+        }
+    },
+
+    // --- Follow-ups ---
+    fetchFollowups: async () => {
+        try {
+            const { data, error } = await supabase.from('lead_followups').select('*').order('due_date', { ascending: true });
+            if (error) throw error;
+            set({ followups: data || [] });
+        } catch (error) {
+            console.error('Failed to fetch follow-ups:', error);
+        }
+    },
+    addFollowup: async (followup) => {
+        try {
+            const { data, error } = await supabase.from('lead_followups').insert([followup]).select().single();
+            if (error) throw error;
+            set((state) => ({ followups: [...state.followups, data] }));
+            if (followup.lead_id) {
+                await get().logLeadActivity(followup.lead_id, 'followup', `Follow-up scheduled for ${followup.due_date}`);
+            }
+            toast.success('Follow-up scheduled');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to schedule follow-up');
+            throw error;
+        }
+    },
+    updateFollowup: async (id, updates) => {
+        try {
+            const { data, error } = await supabase.from('lead_followups').update(updates).eq('id', id).select().single();
+            if (error) throw error;
+            set((state) => ({ followups: state.followups.map((f) => (f.id === id ? data : f)) }));
+            if (updates.status === 'done' && data.lead_id) {
+                await get().logLeadActivity(data.lead_id, 'followup_done', 'Follow-up marked as done');
+            }
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to update follow-up');
+        }
+    },
+    deleteFollowup: async (id) => {
+        try {
+            await supabase.from('lead_followups').delete().eq('id', id);
+            set((state) => ({ followups: state.followups.filter((f) => f.id !== id) }));
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to delete follow-up');
+        }
+    },
+
+    // --- Activities (per-lead timeline) ---
+    fetchLeadActivities: async (leadId) => {
+        try {
+            const { data, error } = await supabase
+                .from('lead_activities')
+                .select('*')
+                .eq('lead_id', leadId)
+                .order('created_at', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Failed to fetch lead activities:', error);
+            return [];
+        }
+    },
+    logLeadActivity: async (leadId, type, description, metadata) => {
+        try {
+            await supabase.from('lead_activities').insert([{ lead_id: leadId, type, description, metadata }]);
+        } catch (error) {
+            console.error('Failed to log activity:', error);
+        }
+    },
+
+    // --- Documents ---
+    fetchLeadDocuments: async (leadId) => {
+        try {
+            const { data, error } = await supabase
+                .from('lead_documents')
+                .select('*')
+                .eq('lead_id', leadId)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Failed to fetch documents:', error);
+            return [];
+        }
+    },
+    addLeadDocument: async (doc) => {
+        try {
+            const { error } = await supabase.from('lead_documents').insert([doc]);
+            if (error) throw error;
+            if (doc.lead_id) {
+                await get().logLeadActivity(doc.lead_id, 'document', `Document uploaded: ${doc.name}`);
+            }
+            toast.success('Document uploaded');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to save document');
+            throw error;
+        }
+    },
+    deleteLeadDocument: async (id) => {
+        try {
+            await supabase.from('lead_documents').delete().eq('id', id);
+            toast.success('Document removed');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to remove document');
+        }
+    },
+
+    // --- Payments (manual ledger) ---
+    fetchLeadPayments: async (leadId) => {
+        try {
+            const { data, error } = await supabase
+                .from('lead_payments')
+                .select('*')
+                .eq('lead_id', leadId)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Failed to fetch payments:', error);
+            return [];
+        }
+    },
+    addLeadPayment: async (payment) => {
+        try {
+            const { error } = await supabase.from('lead_payments').insert([payment]);
+            if (error) throw error;
+            if (payment.lead_id) {
+                await get().logLeadActivity(payment.lead_id, 'payment', `Payment recorded: ${payment.amount}`);
+            }
+            toast.success('Payment recorded');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to record payment');
+            throw error;
+        }
+    },
+    deleteLeadPayment: async (id) => {
+        try {
+            await supabase.from('lead_payments').delete().eq('id', id);
+            toast.success('Payment removed');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to remove payment');
         }
     },
 }));

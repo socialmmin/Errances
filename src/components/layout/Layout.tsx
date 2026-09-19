@@ -5,12 +5,14 @@ import { useAppStore } from '@/store';
 import { triggerBirthdayWishesCheck } from '@/lib/api';
 
 export function Layout() {
-    const { fetchLeads, fetchTours } = useAppStore();
+    const { fetchLeads, fetchTours, fetchLeadStatuses, fetchFollowups } = useAppStore();
 
     useEffect(() => {
         fetchLeads();
         fetchTours();
-    }, [fetchLeads, fetchTours]);
+        fetchLeadStatuses();
+        fetchFollowups();
+    }, [fetchLeads, fetchTours, fetchLeadStatuses, fetchFollowups]);
 
     useEffect(() => {
         triggerBirthdayWishesCheck().catch(err => console.error('Failed to trigger birthday wishes check:', err));

@@ -12,6 +12,7 @@ import dbRoutes from './routes/db.js';
 import uploadRoutes from './routes/upload.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import webhookRoutes from './routes/webhooks.js';
+import leadsRoutes from './routes/leads.js';
 
 import { startBaileys, checkAndSendTravelMessages } from './services/baileysService.js';
 
@@ -34,6 +35,7 @@ async function main() {
     app.use('/api/upload', uploadRoutes);
     app.use('/api/whatsapp', whatsappRoutes);
     app.use('/api/webhooks', webhookRoutes);
+    app.use('/api/leads', leadsRoutes);
 
     const server = http.createServer(app);
     const io = new Server(server, { cors: { origin: config.corsOrigins } });

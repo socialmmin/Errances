@@ -35,33 +35,30 @@ import { useI18n } from '@/i18n';
 import { useFilteredLeads } from '@/hooks/useFilteredLeads';
 import { getLeadRevenue } from '@/lib/utils';
 export function Pipeline() {
-    const { fetchLeads, addLead, updateLead, tours } = useAppStore();
+    const { fetchLeads, addLead, updateLead, tours, leadStatuses, fetchLeadStatuses } = useAppStore();
     const leads = useFilteredLeads();
     const [activeId, setActiveId] = useState<string | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedLead, setSelectedLead] = useState<Lead | undefined>(undefined);
     const { t } = useI18n();
 
-    const COLUMNS = useMemo(() => [
-        { id: 'new', title: t('newLeadsCol') },
-        { id: 'contacted', title: t('contactedCol') },
-        { id: 'qualified', title: t('qualifiedCol') },
-        { id: 'proposal_sent', title: t('proposalSentCol') },
-        { id: 'converted', title: t('convertedCol') },
-        { id: 'lost', title: t('lostCol') },
-    ], [t]);
+    const COLUMNS = useMemo(
+        () => leadStatuses.map((s) => ({ id: s.key, title: s.label, isClosedWon: s.is_closed_won, isClosedLost: s.is_closed_lost })),
+        [leadStatuses]
+    );
 
     useEffect(() => {
         fetchLeads();
-    }, [fetchLeads]);
+        fetchLeadStatuses();
+    }, [fetchLeads, fetchLeadStatuses]);
 
     // Calculate KPIs
     const kpis = useMemo(() => {
         const totalLeads = leads.length;
-        const convertedLeads = leads.filter(l => l.status === 'converted').length;
+        const convertedLeads = leads.filter(l => leadStatuses.find((s) => s.key === l.status)?.is_closed_won).length;
         const conversionRate = totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(1) : '0.0';
         const totalRevenue = leads
-            .filter(l => l.status === 'converted')
+            .filter(l => leadStatuses.find((s) => s.key === l.status)?.is_closed_won)
             .reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
 
         return [
@@ -276,10 +273,10 @@ export function Pipeline() {
                         onDragOver={handleDragOver}
                         onDragEnd={handleDragEnd}
                     >
-                        <div className="flex-1 overflow-hidden pb-6">
-                            <div className="flex gap-3 pb-2 px-1 w-full h-full">
+                        <div className="flex-1 overflow-x-auto pb-6">
+                            <div className="flex gap-3 pb-2 px-1 h-full">
                                 {COLUMNS.map((col) => (
-                                    <div key={col.id} className="flex-1 min-w-[160px] h-full">
+                                    <div key={col.id} className="w-[260px] flex-shrink-0 h-full">
                                         <KanbanColumn
                                             id={col.id}
                                             title={col.title}
