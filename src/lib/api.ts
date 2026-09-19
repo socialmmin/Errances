@@ -1,29 +1,6 @@
 import { supabase, anonClient, API_BASE, getAuthToken } from './supabase';
 import type { Lead, TourPackage } from '@/types';
 
-// --- AUTH ---
-
-export type RegisterPayload = {
-    full_name: string;
-    email: string;
-    phone?: string;
-    access_key: string;
-    password: string;
-};
-
-export async function registerStaff(payload: RegisterPayload) {
-    const response = await fetch(`${API_BASE}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(data.error || 'Registration failed');
-    }
-    return data as { user: any; message: string };
-}
-
 // --- LEADS ---
 
 export async function getLeads() {

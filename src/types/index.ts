@@ -7,7 +7,7 @@ export type User = {
     avatar_url?: string;
     department?: string;
     phone?: string;
-    status?: 'active' | 'inactive' | 'pending';
+    status?: 'active' | 'inactive';
     permissions?: string[];
 };
 

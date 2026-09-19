@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Search, Plus, Mail, MoreHorizontal, Phone, Users, ShieldCheck } from 'lucide-react';
+import { Search, Plus, Mail, MoreHorizontal, Phone, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
     Table,
@@ -123,10 +123,6 @@ export function Staff() {
 
     const handleViewProfile = (staff: User) => {
         navigate(`/staff/${staff.id}`);
-    };
-
-    const handleApproveStaff = async (id: string) => {
-        await updateStaff(id, { status: 'active' });
     };
 
     const handleSaveStaff = async (data: any) => {
@@ -265,11 +261,6 @@ export function Staff() {
                                                 <span className="text-[10px] text-indigo-500 font-black uppercase tracking-widest">
                                                     {staff.find(s => s.id === member.id)?.department || 'Sales'}
                                                 </span>
-                                                {staff.find(s => s.id === member.id)?.status === 'pending' && (
-                                                    <span className="w-fit text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 mt-0.5">
-                                                        Pending Approval
-                                                    </span>
-                                                )}
                                             </div>
                                         </TableCell>
                                         <TableCell>
@@ -317,18 +308,6 @@ export function Staff() {
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end" className="w-56 p-2 rounded-xl shadow-xl border-slate-200/60 font-medium">
                                                     <DropdownMenuLabel className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Manage Staff</DropdownMenuLabel>
-                                                    {staff.find(s => s.id === member.id)?.status === 'pending' && (
-                                                        <>
-                                                            <DropdownMenuItem
-                                                                onClick={() => handleApproveStaff(member.id)}
-                                                                className="rounded-lg px-3 py-2.5 focus:bg-emerald-50 focus:text-emerald-700 transition-colors flex items-center gap-2"
-                                                            >
-                                                                <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center"><ShieldCheck className="w-4 h-4" /></div>
-                                                                Approve Account
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuSeparator className="my-2" />
-                                                        </>
-                                                    )}
                                                     <DropdownMenuItem
                                                         onClick={() => handleViewProfile(staff.find(s => s.id === member.id)!)}
                                                         className="rounded-lg px-3 py-2.5 focus:bg-indigo-50 focus:text-indigo-600 transition-colors flex items-center gap-2"

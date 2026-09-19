@@ -2,14 +2,12 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User } from '@/types';
 import { useAppStore } from '@/store';
 import { supabase } from '@/lib/supabase';
-import { registerStaff, type RegisterPayload } from '@/lib/api';
 
 interface AuthContextType {
     user: User | null;
     loading: boolean;
     signIn: (identifier: string, password: string, rememberMe?: boolean) => Promise<void>;
     signOut: () => Promise<void>;
-    register: (payload: RegisterPayload) => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -78,11 +76,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) throw error;
     };
 
-    const register = async (payload: RegisterPayload) => {
-        const result = await registerStaff(payload);
-        return result.message;
-    };
-
     const signOut = async () => {
         try {
             await supabase.auth.signOut();
@@ -92,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, loading, signIn, signOut, register }}>
+        <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
             {children}
         </AuthContext.Provider>
     );

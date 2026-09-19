@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS staffs (
     avatar_url TEXT,
     department TEXT,
     phone TEXT,
-    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'pending')),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     password_hash TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -24,7 +24,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_table THEN NULL; WHEN duplicate_object THEN NULL;
 END $$;
 ALTER TABLE staffs DROP CONSTRAINT IF EXISTS staffs_status_check;
-ALTER TABLE staffs ADD CONSTRAINT staffs_status_check CHECK (status IN ('active', 'inactive', 'pending'));
+ALTER TABLE staffs ADD CONSTRAINT staffs_status_check CHECK (status IN ('active', 'inactive'));
 
 -- Kept alongside `staffs` (legacy dual-table design used by the frontend for
 -- lead-assignment FK bookkeeping); mirrors a subset of staff columns.
