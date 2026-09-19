@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
-import { CalendarDays, X } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { calculateAge } from '@/lib/leadUtils';
 import { cn } from '@/lib/utils';
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 function toISODate(d: Date): string {
     const yyyy = d.getFullYear();
@@ -53,13 +56,34 @@ export function DateOfBirthPicker({
 }) {
     const [open, setOpen] = useState(false);
     const [text, setText] = useState(value ? formatDisplay(value) : '');
+    const currentYear = new Date().getFullYear();
+    const oldestYear = currentYear - 100;
+    const [viewMonth, setViewMonth] = useState<Date>(value ? new Date(value) : new Date(currentYear - 25, 0));
 
     useEffect(() => {
         setText(value ? formatDisplay(value) : '');
     }, [value]);
 
+    useEffect(() => {
+        if (open) setViewMonth(value ? new Date(value) : new Date(currentYear - 25, 0));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    const years = useMemo(() => {
+        const arr: number[] = [];
+        for (let y = currentYear; y >= oldestYear; y--) arr.push(y);
+        return arr;
+    }, [currentYear, oldestYear]);
+
     const age = calculateAge(value);
-    const currentYear = new Date().getFullYear();
+
+    const goToMonth = (delta: number) => {
+        setViewMonth((prev) => {
+            const next = new Date(prev.getFullYear(), prev.getMonth() + delta, 1);
+            if (next.getFullYear() < oldestYear || next.getFullYear() > currentYear) return prev;
+            return next;
+        });
+    };
 
     return (
         <div className="space-y-1.5">
@@ -109,12 +133,48 @@ export function DateOfBirthPicker({
                                 <CalendarDays className="h-3.5 w-3.5" />
                             </button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="end">
+                        <PopoverContent className="w-[300px] p-3" align="end" sideOffset={8}>
+                            {/* Custom month/year header — replaces react-day-picker's built-in
+                                dropdown caption, which renders unstyled duplicate native <select>s. */}
+                            <div className="flex items-center gap-1.5 mb-3">
+                                <button
+                                    type="button"
+                                    onClick={() => goToMonth(-1)}
+                                    className="h-8 w-8 flex-shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <Select
+                                    value={String(viewMonth.getMonth())}
+                                    onValueChange={(v) => setViewMonth((prev) => new Date(prev.getFullYear(), Number(v), 1))}
+                                >
+                                    <SelectTrigger className="h-8 flex-1 text-xs font-bold rounded-lg"><SelectValue /></SelectTrigger>
+                                    <SelectContent className="max-h-64">
+                                        {MONTH_NAMES.map((m, idx) => <SelectItem key={m} value={String(idx)}>{m}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                                <Select
+                                    value={String(viewMonth.getFullYear())}
+                                    onValueChange={(v) => setViewMonth((prev) => new Date(Number(v), prev.getMonth(), 1))}
+                                >
+                                    <SelectTrigger className="h-8 w-[84px] flex-shrink-0 text-xs font-bold rounded-lg"><SelectValue /></SelectTrigger>
+                                    <SelectContent className="max-h-64">
+                                        {years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                                <button
+                                    type="button"
+                                    onClick={() => goToMonth(1)}
+                                    className="h-8 w-8 flex-shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
                             <Calendar
                                 mode="single"
-                                captionLayout="dropdown"
-                                startMonth={new Date(currentYear - 100, 0)}
-                                endMonth={new Date(currentYear, 11)}
+                                month={viewMonth}
+                                onMonthChange={setViewMonth}
+                                classNames={{ month_caption: 'hidden', nav: 'hidden', month: 'space-y-0' }}
                                 selected={value ? new Date(value) : undefined}
                                 onSelect={(d) => {
                                     if (!d) return;
@@ -123,7 +183,8 @@ export function DateOfBirthPicker({
                                     setText(formatDisplay(iso));
                                     setOpen(false);
                                 }}
-                                disabled={{ after: new Date() }}
+                                disabled={{ after: new Date(), before: new Date(oldestYear, 0, 1) }}
+                                className="p-0"
                             />
                         </PopoverContent>
                     </Popover>
