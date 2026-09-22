@@ -18,7 +18,7 @@ import type { Lead } from '@/types';
 import { KPICards } from '@/components/dashboard/KPICards';
 import { useI18n } from '@/i18n';
 import { WhatsAppModal } from '@/components/leads/WhatsAppModal';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 
 import { useFilteredLeads } from '@/hooks/useFilteredLeads';
@@ -31,10 +31,12 @@ export function Leads() {
     const { filtered: leads, FilterBar } = useLeadFilters(rawLeads, 'leads');
     const { t } = useI18n();
     const navigate = useNavigate();
+    const location = useLocation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedLead, setSelectedLead] = useState<Lead | undefined>(undefined);
     const [whatsappLead, setWhatsappLead] = useState<Lead | null>(null);
+    const [quickAddPreset, setQuickAddPreset] = useState<{ source?: string; phone?: string; name?: string } | null>(null);
 
     useEffect(() => {
         fetchLeads();
@@ -42,6 +44,17 @@ export function Leads() {
         fetchFollowups();
         fetchStaff();
     }, [fetchLeads, fetchLeadStatuses, fetchFollowups, fetchStaff]);
+
+    // Opened via Quick Add / "Create WhatsApp Lead" elsewhere in the app (navigate('/leads', { state: {...} }))
+    useEffect(() => {
+        const state = location.state as { openAdd?: boolean; presetSource?: string; presetPhone?: string; presetName?: string } | null;
+        if (state?.openAdd) {
+            setSelectedLead(undefined);
+            setQuickAddPreset({ source: state.presetSource, phone: state.presetPhone, name: state.presetName });
+            setIsDialogOpen(true);
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
 
     // KPI calculation
     const kpis = useMemo(() => {
@@ -135,6 +148,7 @@ export function Leads() {
 
     const handleAddLead = () => {
         setSelectedLead(undefined);
+        setQuickAddPreset(null);
         setIsDialogOpen(true);
     };
 
@@ -248,6 +262,9 @@ export function Leads() {
                         onSubmit={handleSaveLead}
                         onCancel={() => setIsDialogOpen(false)}
                         onViewExisting={(id) => { setIsDialogOpen(false); navigate(`/leads/${id}`); }}
+                        presetSource={quickAddPreset?.source}
+                        presetPhone={quickAddPreset?.phone}
+                        presetName={quickAddPreset?.name}
                     />
                 </DialogContent>
             </Dialog>

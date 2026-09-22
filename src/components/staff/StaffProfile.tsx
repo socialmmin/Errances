@@ -45,6 +45,13 @@ export function StaffProfile({ staff, open, onOpenChange }: StaffProfileProps) {
     const tours = useAppStore(state => state.tours);
     const sendWhatsApp = useAppStore(state => state.sendWhatsApp);
     const fetchLeads = useAppStore(state => state.fetchLeads);
+    const leadStatuses = useAppStore(state => state.leadStatuses);
+    const fetchLeadStatuses = useAppStore(state => state.fetchLeadStatuses);
+    const isWonStatus = (status: string) => leadStatuses.find((s) => s.key === status)?.is_closed_won ?? false;
+
+    useEffect(() => {
+        if (open && leadStatuses.length <= 1) fetchLeadStatuses();
+    }, [open, leadStatuses.length, fetchLeadStatuses]);
 
     const [messages, setMessages] = useState<any[]>([]);
     const [messageInput, setMessageInput] = useState('');
@@ -216,14 +223,14 @@ export function StaffProfile({ staff, open, onOpenChange }: StaffProfileProps) {
         );
         const staffLeads = filteredLeads.filter(l => l.assigned_staff_id === staff.id);
         const totalLeads = staffLeads.length;
-        const convertedLeads = staffLeads.filter(l => l.status === 'converted');
+        const convertedLeads = staffLeads.filter(l => isWonStatus(l.status));
 
         const dealsClosed = convertedLeads.length;
         const totalRevenue = convertedLeads.reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
         const conversion = totalLeads > 0 ? Math.round((dealsClosed / totalLeads) * 100) : 0;
 
         return { dealsClosed, totalRevenue, conversion, totalLeads, staffLeads };
-    }, [staff, leads]);
+    }, [staff, leads, leadStatuses]);
 
     if (!staff) return null;
 
@@ -346,8 +353,8 @@ export function StaffProfile({ staff, open, onOpenChange }: StaffProfileProps) {
                                                             <div className="flex justify-center">
                                                                 <Badge className={cn(
                                                                     "uppercase text-[7px] font-black tracking-[0.15em] px-2 py-0.5 rounded-full border-none shadow-sm",
-                                                                    lead.status === 'converted' ? "bg-emerald-500 text-white" :
-                                                                        lead.status === 'lost' ? "bg-rose-500 text-white" :
+                                                                    isWonStatus(lead.status) ? "bg-emerald-500 text-white" :
+                                                                        leadStatuses.find((s) => s.key === lead.status)?.is_closed_lost ? "bg-rose-500 text-white" :
                                                                             "bg-indigo-500 text-white"
                                                                 )}>
                                                                     {lead.status}

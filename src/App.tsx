@@ -5,6 +5,7 @@ import { I18nProvider } from '@/components/I18nProvider';
 import { Layout } from '@/components/layout/Layout';
 import { AnalyticsTracker } from '@/components/AnalyticsTracker';
 import { Toaster } from '@/components/ui/Toast';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Dashboard } from '@/pages/Dashboard';
 import { Login } from '@/pages/Login';
 import { TourList } from '@/pages/tours/TourList';
@@ -74,9 +75,11 @@ export default function App() {
     <I18nProvider>
       <Router>
         <AuthProvider>
-          <AnalyticsTracker />
-          <Toaster />
-          <AppRoutes />
+          <TooltipProvider delayDuration={200}>
+            <AnalyticsTracker />
+            <Toaster />
+            <AppRoutes />
+          </TooltipProvider>
         </AuthProvider>
       </Router>
     </I18nProvider>

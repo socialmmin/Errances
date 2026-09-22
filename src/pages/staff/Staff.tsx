@@ -40,7 +40,7 @@ import { KPICards } from '@/components/dashboard/KPICards';
 
 
 export function Staff() {
-    const { staff, addStaff, updateStaff, deleteStaff, fetchStaff, fetchLeads, fetchTours, tours } = useAppStore();
+    const { staff, addStaff, updateStaff, deleteStaff, fetchStaff, fetchLeads, fetchTours, tours, leadStatuses, fetchLeadStatuses } = useAppStore();
     const leads = useFilteredLeads();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
@@ -52,13 +52,14 @@ export function Staff() {
         fetchStaff();
         fetchLeads();
         fetchTours();
-    }, [fetchStaff, fetchLeads, fetchTours]);
+        fetchLeadStatuses();
+    }, [fetchStaff, fetchLeads, fetchTours, fetchLeadStatuses]);
 
     // Calculate staff sales data & sort top performers SaaS style
     const staffSalesData = useMemo(() => {
         return staff.map(member => {
             const allAssigned = leads.filter(l => l.assigned_staff_id === member.id);
-            const convertedLeads = allAssigned.filter(l => l.status === 'converted');
+            const convertedLeads = allAssigned.filter(l => leadStatuses.find((s) => s.key === l.status)?.is_closed_won);
             const salesRevenue = convertedLeads.reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
             const conversionRate = allAssigned.length > 0
                 ? Math.round((convertedLeads.length / allAssigned.length) * 100)
@@ -85,7 +86,7 @@ export function Staff() {
                 colorRing: 'border-slate-200' // Simple neutral ring
             };
         });
-    }, [staff, leads]);
+    }, [staff, leads, leadStatuses]);
 
     // Calculate aggregated KPIs for Summary Cards
     const summaryKPIs = useMemo(() => {

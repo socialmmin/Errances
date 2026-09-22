@@ -78,6 +78,11 @@ interface LeadFormProps {
     onSubmit: (data: any) => void;
     onCancel: () => void;
     onViewExisting?: (leadId: string) => void;
+    /** Prefills the Source field for fast lead entry (e.g. from the WhatsApp inbox or Quick Add). Ignored when editing. */
+    presetSource?: string;
+    /** Prefills phone + WhatsApp number, e.g. when creating a lead from an unmatched WhatsApp conversation. Ignored when editing. */
+    presetPhone?: string;
+    presetName?: string;
 }
 
 function parseLegacyNotes(notes?: string) {
@@ -100,7 +105,7 @@ function parseLegacyNotes(notes?: string) {
     return parsed;
 }
 
-export function LeadForm({ initialData, onSubmit, onCancel, onViewExisting }: LeadFormProps) {
+export function LeadForm({ initialData, onSubmit, onCancel, onViewExisting, presetSource, presetPhone, presetName }: LeadFormProps) {
     const { tours, staff, fetchStaff, leadStatuses, fetchLeadStatuses } = useAppStore();
     const [duplicate, setDuplicate] = useState<any>(null);
     const [checkingDuplicate, setCheckingDuplicate] = useState(false);
@@ -143,8 +148,8 @@ export function LeadForm({ initialData, onSubmit, onCancel, onViewExisting }: Le
             tour_departure: legacy.tour_departure || initialData.travel_date || '',
             tour_arrival: legacy.tour_arrival,
         } : {
-            name: '', email: '', phone: '', whatsapp_number: '',
-            status: 'new', priority: 'medium', source: 'Website', campaign: '',
+            name: presetName || '', email: '', phone: presetPhone || '', whatsapp_number: presetPhone || '',
+            status: 'new', priority: 'medium', source: presetSource || 'Website', campaign: '',
             tour_interest: '', requirement: '', budget: undefined, expected_closing_date: '',
             assigned_staff_id: '', lead_owner_id: '',
             dob: '', gender: '', passport_number: '', photo_url: '',

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFilteredLeads } from '@/hooks/useFilteredLeads';
 import { useAppStore } from '@/store';
 import { getLeadRevenue } from '@/lib/utils';
@@ -12,8 +12,12 @@ const LEAD_SOURCE_COLORS = ['#E50914', '#a855f7', '#f59e0b', '#10b981', '#ef4444
 
 export function ReportsTab() {
     const leads = useFilteredLeads();
-    const { tours } = useAppStore();
+    const { tours, leadStatuses, fetchLeadStatuses } = useAppStore();
     const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+
+    useEffect(() => {
+        if (leadStatuses.length <= 1) fetchLeadStatuses();
+    }, [leadStatuses.length, fetchLeadStatuses]);
 
     const analytics = useMemo(() => {
         // Filter leads by date range
@@ -50,7 +54,7 @@ export function ReportsTab() {
         const monthlyRevenueData = months.map(name => ({ name, revenue: 0 }));
 
         filteredLeads.forEach(lead => {
-            if (lead.status === 'converted' && lead.created_at) {
+            if (leadStatuses.find((s) => s.key === lead.status)?.is_closed_won && lead.created_at) {
                 const date = new Date(lead.created_at);
                 const monthIndex = date.getMonth();
                 if (monthIndex >= 0 && monthIndex < 12) {
@@ -60,7 +64,7 @@ export function ReportsTab() {
         });
 
         return { leadSourcesData, monthlyRevenueData };
-    }, [leads, dateRange]);
+    }, [leads, dateRange, leadStatuses]);
 
     return (
         <div className="space-y-6">

@@ -16,7 +16,8 @@ interface LeadCardProps {
 
 export function LeadCard({ lead }: LeadCardProps) {
     const navigate = useNavigate();
-    const { tours } = useAppStore();
+    const { tours, leadStatuses } = useAppStore();
+    const isWon = leadStatuses.find((s) => s.key === lead.status)?.is_closed_won ?? false;
     const {
         attributes,
         listeners,
@@ -59,7 +60,7 @@ export function LeadCard({ lead }: LeadCardProps) {
             <div className={cn(
                 "absolute top-0 left-0 w-full h-1 bg-gradient-to-r transition-opacity duration-300",
                 lead.status === 'new' ? "from-indigo-400 to-cyan-400" :
-                    lead.status === 'converted' ? "from-emerald-400 to-teal-400" :
+                    isWon ? "from-emerald-400 to-teal-400" :
                         "from-slate-300 to-slate-400",
                 "opacity-0 group-hover:opacity-100"
             )} />
@@ -71,7 +72,7 @@ export function LeadCard({ lead }: LeadCardProps) {
                         <AvatarFallback className={cn(
                             "text-[9px] font-bold",
                             lead.status === 'new' ? 'bg-indigo-50 text-indigo-700' :
-                                lead.status === 'converted' ? 'bg-emerald-50 text-emerald-700' :
+                                isWon ? 'bg-emerald-50 text-emerald-700' :
                                     'bg-slate-50 text-slate-700'
                         )}>
                             {lead.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
@@ -149,7 +150,7 @@ export function LeadCard({ lead }: LeadCardProps) {
                     <div className={cn(
                         "w-1 h-1 rounded-full",
                         lead.status === 'new' ? "bg-indigo-400 animate-pulse" :
-                            lead.status === 'converted' ? "bg-emerald-400" :
+                            isWon ? "bg-emerald-400" :
                                 "bg-slate-300"
                     )} />
                 </div>

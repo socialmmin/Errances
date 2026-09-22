@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, PieChart, Pie, Cell } from 'recharts';
 import { KPICards } from '@/components/dashboard/KPICards';
@@ -25,8 +25,13 @@ import { getLeadRevenue } from '@/lib/utils';
 
 export function LeadAnalyticsTab() {
     const { leads } = { leads: useFilteredLeads() };
-    const { tours } = useAppStore();
+    const { tours, leadStatuses, fetchLeadStatuses } = useAppStore();
     const [days, setDays] = useState('all');
+    const isWonStatus = (status: string) => leadStatuses.find((s) => s.key === status)?.is_closed_won ?? false;
+
+    useEffect(() => {
+        if (leadStatuses.length <= 1) fetchLeadStatuses();
+    }, [leadStatuses.length, fetchLeadStatuses]);
 
     const analytics = useMemo(() => {
         // Filter leads by period
@@ -58,17 +63,17 @@ export function LeadAnalyticsTab() {
             : [];
 
         const totalLeads = filteredLeads.length;
-        const convertedLeads = filteredLeads.filter(l => l.status === 'converted').length;
+        const convertedLeads = filteredLeads.filter(l => isWonStatus(l.status)).length;
         const conversionRate = totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(1) : '0.0';
         const totalRevenue = filteredLeads
-            .filter(l => l.status === 'converted')
+            .filter(l => isWonStatus(l.status))
             .reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
 
         const prevTotalLeads = prevFilteredLeads.length;
-        const prevConvertedLeads = prevFilteredLeads.filter(l => l.status === 'converted').length;
+        const prevConvertedLeads = prevFilteredLeads.filter(l => isWonStatus(l.status)).length;
         const prevConversionRate = prevTotalLeads > 0 ? (prevConvertedLeads / prevTotalLeads) * 100 : 0;
         const prevTotalRevenue = prevFilteredLeads
-            .filter(l => l.status === 'converted')
+            .filter(l => isWonStatus(l.status))
             .reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
 
         const getChange = (curr: number, prev: number) => {
@@ -96,25 +101,17 @@ export function LeadAnalyticsTab() {
             return acc;
         }, {} as Record<string, number>);
 
-        const funnelData = [
-            { name: 'New', value: statusCounts['new'] || 0 },
-            { name: 'Contacted', value: statusCounts['contacted'] || 0 },
-            { name: 'Qualified', value: statusCounts['qualified'] || 0 },
-            { name: 'Proposal', value: statusCounts['proposal_sent'] || 0 },
-            { name: 'Converted', value: statusCounts['converted'] || 0 },
-        ];
+        const sortedStatuses = [...leadStatuses].sort((a, b) => a.sort_order - b.sort_order);
+        const funnelData = sortedStatuses
+            .filter((s) => !s.is_closed_lost)
+            .map((s) => ({ name: s.label, value: statusCounts[s.key] || 0 }));
 
-        const statusData = [
-            { name: 'New', value: statusCounts['new'] || 0 },
-            { name: 'Contacted', value: statusCounts['contacted'] || 0 },
-            { name: 'Qualified', value: statusCounts['qualified'] || 0 },
-            { name: 'Proposal Sent', value: statusCounts['proposal_sent'] || 0 },
-            { name: 'Converted', value: statusCounts['converted'] || 0 },
-            { name: 'Lost', value: statusCounts['lost'] || 0 },
-        ].filter(item => item.value > 0);
+        const statusData = sortedStatuses
+            .map((s) => ({ name: s.label, value: statusCounts[s.key] || 0 }))
+            .filter(item => item.value > 0);
 
         return { kpis, funnelData, statusData, totalLeads };
-    }, [leads, days]);
+    }, [leads, days, leadStatuses]);
 
     return (
         <div className="space-y-3 animate-in fade-in duration-500">

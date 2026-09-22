@@ -4,6 +4,8 @@ import { KPICards } from '@/components/dashboard/KPICards';
 import { LeadsTrendChart } from '@/components/dashboard/LeadsTrendChart';
 import { RevenueChart } from '@/components/dashboard/RevenueChart';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
+import { PipelineFunnel } from '@/components/dashboard/PipelineFunnel';
+import { UpcomingFollowUps } from '@/components/dashboard/UpcomingFollowUps';
 import { useAppStore } from '@/store';
 import { useMemo, useState } from 'react';
 import { format, subDays, parseISO } from 'date-fns';
@@ -36,7 +38,7 @@ function useGreeting() {
 }
 
 export function Dashboard() {
-    const { tours, addLead } = useAppStore();
+    const { tours, addLead, leadStatuses, followups } = useAppStore();
     const { user } = useAuth();
     const greeting = useGreeting();
     const leads = useFilteredLeads();
@@ -53,25 +55,22 @@ export function Dashboard() {
     };
 
     const dashboardData = useMemo(() => {
+        const isWon = (status: string) => leadStatuses.find((s) => s.key === status)?.is_closed_won ?? status === 'converted';
+        const isLost = (status: string) => leadStatuses.find((s) => s.key === status)?.is_closed_lost ?? status === 'lost';
+        const isOpen = (status: string) => !isWon(status) && !isLost(status);
+
         // 1. KPIs
         const totalLeads = leads.length;
         const activeTours = tours.filter(t => t.status === 'active').length;
 
-        // Calculate conversion rate
-        const convertedLeads = leads.filter(l => l.status === 'converted').length;
-        const conversionRate = totalLeads > 0
-            ? ((convertedLeads / totalLeads) * 100).toFixed(1)
-            : '0.0';
+        const wonLeads = leads.filter(l => isWon(l.status)).length;
+        const conversionRate = totalLeads > 0 ? ((wonLeads / totalLeads) * 100).toFixed(1) : '0.0';
 
-        // Calculate Revenue (sum of budget for converted leads, falling back to package price if 0/null)
         const totalRevenue = leads
-            .filter(l => l.status === 'converted')
+            .filter(l => isWon(l.status))
             .reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
 
-        // Pending follow-ups (leads in 'contacted' or 'proposal_sent' status)
-        const pendingFollowUps = leads.filter(l =>
-            l.status === 'contacted' || l.status === 'proposal_sent'
-        ).length;
+        const pendingFollowUps = followups.filter((f) => f.status === 'pending').length;
 
         const kpis = [
             { label: t('totalLeads'), value: totalLeads.toString(), icon: 'Users', link: '/leads' },
@@ -79,9 +78,9 @@ export function Dashboard() {
             { label: t('conversionRate'), value: `${conversionRate}%`, icon: 'TrendingUp', link: '/analytics' },
             { label: t('revenue'), value: `€${totalRevenue.toLocaleString()}`, icon: 'Euro', link: '/analytics' },
             { label: t('pendingFollowUps'), value: pendingFollowUps.toString(), icon: 'Calendar', link: '/pipeline' },
-            { label: t('wonLeads'), value: convertedLeads.toString(), icon: 'UserCheck', link: '/leads' },
-            { label: t('avgBudget'), value: convertedLeads > 0 ? `€${Math.round(totalRevenue / convertedLeads).toLocaleString()}` : '€0', icon: 'Euro', link: '/analytics' },
-            { label: t('lostLeads'), value: leads.filter(l => l.status === 'lost').length.toString(), icon: 'Users', link: '/leads' },
+            { label: t('wonLeads'), value: wonLeads.toString(), icon: 'UserCheck', link: '/leads' },
+            { label: t('avgBudget'), value: wonLeads > 0 ? `€${Math.round(totalRevenue / wonLeads).toLocaleString()}` : '€0', icon: 'Euro', link: '/analytics' },
+            { label: t('lostLeads'), value: leads.filter(l => isLost(l.status)).length.toString(), icon: 'Users', link: '/leads' },
         ];
 
         // 2. Leads Trend Data (Last 30 Days)
@@ -95,12 +94,9 @@ export function Dashboard() {
             return { name: dateStr, leads: count };
         });
 
-        // simplified to grouping by 5-day intervals if needed, but daily is fine for now if data is sparse
-
-        // 3. Revenue by Package
-        // Group converted leads by tour_interest
+        // 3. Revenue by Package (won leads only)
         const revenueByPackageMap = leads
-            .filter(l => l.status === 'converted' && l.tour_interest)
+            .filter(l => isWon(l.status) && l.tour_interest)
             .reduce((acc, lead) => {
                 const tourName = lead.tour_interest || 'Custom';
                 acc[tourName] = (acc[tourName] || 0) + getLeadRevenue(lead, tours);
@@ -112,8 +108,13 @@ export function Dashboard() {
             revenue
         })).sort((a, b) => b.revenue - a.revenue);
 
-        // 4. Recent Activity
-        // Combine leads and tours creation into a single timeline
+        // 4. Pipeline funnel (open stages only, in configured order)
+        const funnel = leadStatuses
+            .filter((s) => isOpen(s.key))
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((s) => ({ key: s.key, label: s.label, color: s.color, count: leads.filter((l) => l.status === s.key).length }));
+
+        // 5. Recent Activity
         const recentActivity = [
             ...leads.map(l => ({
                 id: `lead-${l.id}`,
@@ -128,7 +129,7 @@ export function Dashboard() {
                 user: t('system'),
                 action: t('newTourAdded'),
                 target: tour.title,
-                time: new Date().toISOString(), // Tours don't have created_at in interface yet, fallback
+                time: new Date().toISOString(),
                 avatar: ''
             }))
         ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
@@ -138,8 +139,8 @@ export function Dashboard() {
                 time: format(parseISO(activity.time), 'MMM d, h:mm a')
             }));
 
-        return { kpis, leadsTrendData, revenueData, recentActivity };
-    }, [leads, tours, t]);
+        return { kpis, leadsTrendData, revenueData, recentActivity, funnel };
+    }, [leads, tours, t, leadStatuses, followups]);
 
     return (
         <div className="flex flex-col min-h-full gap-4">
@@ -179,6 +180,11 @@ export function Dashboard() {
 
             <div className="flex-none">
                 <KPICards kpis={dashboardData.kpis} />
+            </div>
+
+            <div className="flex-initial grid gap-4 lg:grid-cols-3">
+                <PipelineFunnel stages={dashboardData.funnel} />
+                <UpcomingFollowUps />
             </div>
 
             <div className="flex-initial grid gap-4 md:grid-cols-2 lg:grid-cols-7">

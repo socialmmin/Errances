@@ -75,7 +75,9 @@ export function StaffDetails() {
         fetchTours,
         updateStaff,
         deleteStaff,
-        sendWhatsApp
+        sendWhatsApp,
+        leadStatuses,
+        fetchLeadStatuses,
     } = useAppStore();
 
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -85,13 +87,15 @@ export function StaffDetails() {
     const [isAttaching, setIsAttaching] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const isWonStatus = (status: string) => leadStatuses.find((s) => s.key === status)?.is_closed_won ?? false;
 
     // Initial load
     useEffect(() => {
         fetchStaff();
         fetchLeads();
         fetchTours();
-    }, [fetchStaff, fetchLeads, fetchTours]);
+        fetchLeadStatuses();
+    }, [fetchStaff, fetchLeads, fetchTours, fetchLeadStatuses]);
 
     // Find current staff member
     const member = useMemo(() => {
@@ -287,33 +291,28 @@ export function StaffDetails() {
         );
         const staffLeads = filteredLeads.filter(l => l.assigned_staff_id === member.id);
         const totalLeads = staffLeads.length;
-        const convertedLeads = staffLeads.filter(l => l.status === 'converted');
+        const convertedLeads = staffLeads.filter(l => isWonStatus(l.status));
 
         const dealsClosed = convertedLeads.length;
         const totalRevenue = convertedLeads.reduce((sum, l) => sum + getLeadRevenue(l, tours), 0);
         const conversion = totalLeads > 0 ? Math.round((dealsClosed / totalLeads) * 100) : 0;
 
         return { dealsClosed, totalRevenue, conversion, totalLeads, staffLeads };
-    }, [member, leads]);
+    }, [member, leads, leadStatuses]);
 
     const statusData = useMemo(() => {
         const counts: Record<string, number> = {};
         stats.staffLeads.forEach(l => {
             counts[l.status] = (counts[l.status] || 0) + 1;
         });
-        return [
-            { name: 'New', value: counts['new'] || 0 },
-            { name: 'Contacted', value: counts['contacted'] || 0 },
-            { name: 'Qualified', value: counts['qualified'] || 0 },
-            { name: 'Proposal Sent', value: counts['proposal_sent'] || 0 },
-            { name: 'Converted', value: counts['converted'] || 0 },
-            { name: 'Lost', value: counts['lost'] || 0 },
-        ].filter(item => item.value > 0);
-    }, [stats.staffLeads]);
+        return leadStatuses
+            .map((s) => ({ name: s.label, value: counts[s.key] || 0 }))
+            .filter(item => item.value > 0);
+    }, [stats.staffLeads, leadStatuses]);
 
     const revenueData = useMemo(() => {
         const converted = stats.staffLeads
-            .filter(l => l.status === 'converted' && l.created_at)
+            .filter(l => isWonStatus(l.status) && l.created_at)
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         
         let cumulative = 0;
@@ -600,8 +599,8 @@ export function StaffDetails() {
                                                     <div className="flex justify-center">
                                                         <Badge className={cn(
                                                             "uppercase text-[7px] font-black tracking-[0.15em] px-2 py-0.5 rounded-full border-none shadow-sm",
-                                                            lead.status === 'converted' ? "bg-emerald-500 text-white" :
-                                                                lead.status === 'lost' ? "bg-rose-500 text-white" :
+                                                            isWonStatus(lead.status) ? "bg-emerald-500 text-white" :
+                                                                leadStatuses.find((s) => s.key === lead.status)?.is_closed_lost ? "bg-rose-500 text-white" :
                                                                     "bg-indigo-500 text-white"
                                                         )}>
                                                             {lead.status}

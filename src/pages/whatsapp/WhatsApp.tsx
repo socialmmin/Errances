@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { WhatsAppLeadInfoPanel } from '@/components/whatsapp/WhatsAppLeadInfoPanel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -51,6 +52,7 @@ export function WhatsApp() {
     const updateLead = useAppStore(state => state.updateLead);
     const deleteLead = useAppStore(state => state.deleteLead);
     const location = useLocation();
+    const navigate = useNavigate();
 
     const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
     const [messageInput, setMessageInput] = useState('');
@@ -1006,6 +1008,21 @@ export function WhatsApp() {
                         {!isBroadcastMode ? (
                             <div className="flex gap-1.5">
                                 <button
+                                    onClick={() => navigate('/leads', {
+                                        state: selectedContact ? {
+                                            openAdd: true,
+                                            presetSource: 'WhatsApp',
+                                            presetPhone: selectedContact.phone,
+                                            presetName: selectedContact.name,
+                                        } : { openAdd: true, presetSource: 'WhatsApp' },
+                                    })}
+                                    title="Create a lead from this WhatsApp conversation"
+                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold text-[#33A894] hover:text-[#2c9180] hover:bg-emerald-50 border border-emerald-100 transition-colors"
+                                >
+                                    <Plus className="h-3 w-3" />
+                                    Lead
+                                </button>
+                                <button
                                     onClick={() => syncTwilioMessages(true)}
                                     title="Sync messages from Twilio"
                                     className="flex items-center justify-center p-1.5 rounded-lg text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 border border-indigo-100 transition-colors"
@@ -1752,6 +1769,8 @@ export function WhatsApp() {
                     </div>
                 )}
             </div>
+
+            <WhatsAppLeadInfoPanel leadId={selectedContact?.id ?? null} />
 
             {/* New Group Dialog */}
             <Dialog open={isNewGroupOpen} onOpenChange={setIsNewGroupOpen}>

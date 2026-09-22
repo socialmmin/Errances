@@ -4,6 +4,8 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { LeadCard } from './LeadCard';
 import type { Lead } from '@/types';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/store';
+import { getStatusConfig, statusBadgeClass } from '@/lib/leadUtils';
 
 interface KanbanColumnProps {
     id: string;
@@ -15,22 +17,8 @@ export function KanbanColumn({ id, title, leads }: KanbanColumnProps) {
     const { setNodeRef } = useDroppable({
         id: id,
     });
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'new': return 'text-red-700 bg-red-50 border-red-100';
-            case 'contacted': return 'text-indigo-700 bg-indigo-50 border-indigo-100';
-            case 'qualified': return 'text-emerald-700 bg-emerald-50 border-emerald-100';
-            case 'proposal_sent': return 'text-purple-700 bg-purple-50 border-purple-100';
-            case 'converted': return 'text-teal-700 bg-teal-50 border-teal-100';
-            case 'lost': return 'text-rose-700 bg-rose-50 border-rose-100';
-            default: return 'text-slate-700 bg-slate-50 border-slate-100';
-        }
-    };
-
-
-
-    const colorClass = getStatusColor(id);
+    const { leadStatuses } = useAppStore();
+    const colorClass = statusBadgeClass(getStatusConfig(leadStatuses, id).color);
 
     return (
         <div className={cn(
