@@ -40,7 +40,7 @@ import { KPICards } from '@/components/dashboard/KPICards';
 
 
 export function Staff() {
-    const { staff, addStaff, updateStaff, deleteStaff, fetchStaff, fetchLeads, fetchTours, tours, leadStatuses, fetchLeadStatuses } = useAppStore();
+    const { staff, addStaff, updateStaff, fetchStaff, fetchLeads, fetchTours, tours, leadStatuses, fetchLeadStatuses } = useAppStore();
     const leads = useFilteredLeads();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
@@ -86,7 +86,7 @@ export function Staff() {
                 colorRing: 'border-slate-200' // Simple neutral ring
             };
         });
-    }, [staff, leads, leadStatuses]);
+    }, [staff, leads, leadStatuses, tours]);
 
     // Calculate aggregated KPIs for Summary Cards
     const summaryKPIs = useMemo(() => {
@@ -117,8 +117,8 @@ export function Staff() {
     };
 
     const handleDeleteStaff = (id: string) => {
-        if (confirm('Are you sure you want to delete this staff member?')) {
-            deleteStaff(id);
+        if (confirm('Deactivate this account? Sign-in will be blocked and existing leads preserved.')) {
+            void updateStaff(id, { status: 'inactive' }).catch(() => {});
         }
     };
 
@@ -134,19 +134,14 @@ export function Staff() {
             role: data.role,
             phone: data.phone,
             avatar_url: selectedStaff?.avatar_url,
-            status: 'active',
+            status: data.status,
+            access_key: data.access_key,
         };
 
         if (selectedStaff) {
-            await updateStaff(selectedStaff.id, userData);
+            await updateStaff(selectedStaff.id, { ...userData, ...(data.password ? { password: data.password } : {}) });
         } else {
-            // Use sanitized mobile number as the password for new staff
-            // Strip all non-digit characters to ensure consistency
-            const sanitizedPhone = (data.phone || '').replace(/\D/g, '');
-            const generatedPassword = sanitizedPhone || 'Welcome@123';
-
-            console.log('Creating staff with password (sanitized phone):', generatedPassword);
-            await addStaff(userData, generatedPassword);
+            await addStaff(userData, data.password);
         }
         setIsDialogOpen(false);
     };
@@ -154,9 +149,9 @@ export function Staff() {
     const filteredStaffData = useMemo(() => {
         return staffSalesData.filter(member =>
             member.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            member.id.toLowerCase().includes(searchTerm.toLowerCase())
+            [member.id, staff.find(s => s.id === member.id)?.email, staff.find(s => s.id === member.id)?.access_key].some(value => value?.toLowerCase().includes(searchTerm.toLowerCase()))
         );
-    }, [staffSalesData, searchTerm]);
+    }, [staffSalesData, searchTerm, staff]);
 
     const formatRole = (role: string) => {
         return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -249,7 +244,8 @@ export function Staff() {
                                                         {member.fullName}
                                                     </span>
                                                     <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">
-                                                        ID: {member.id.substring(0, 8)}
+                                                        Login: {staff.find(s => s.id === member.id)?.access_key || staff.find(s => s.id === member.id)?.email}
+                                                        {staff.find(s => s.id === member.id)?.status === 'inactive' && ' · Inactive'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -300,7 +296,7 @@ export function Staff() {
                                                 </div>
                                             </div>
                                         </TableCell>
-                                        <TableCell className="text-right pr-8">
+                                        <TableCell className="text-right pr-8" onClick={event => event.stopPropagation()}>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <Button variant="ghost" className="h-10 w-10 p-0 rounded-xl hover:bg-slate-100 group">

@@ -260,10 +260,14 @@ export function StaffDetails() {
                 email: data.email,
                 role: data.role,
                 phone: data.phone,
+                access_key: data.access_key,
+                status: data.status,
+                ...(data.password ? { password: data.password } : {}),
             });
             setIsEditDialogOpen(false);
         } catch (err) {
             console.error('Failed to save staff:', err);
+            throw err;
         }
     };
 

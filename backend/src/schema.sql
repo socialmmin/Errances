@@ -373,3 +373,11 @@ CREATE INDEX IF NOT EXISTS idx_leads_assigned_staff ON leads(assigned_staff_id);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_lead_id ON whatsapp_messages(lead_id);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_created_at ON whatsapp_messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_user_activity_user_id ON user_activity(user_id);
+
+-- Package information shown in the catalog and enquiry flow.
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS departure_city TEXT;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS availability TEXT;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS accommodation TEXT;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS meals TEXT;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS transport TEXT;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS cancellation_policy TEXT;

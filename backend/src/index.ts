@@ -8,6 +8,7 @@ import { authenticate } from './middleware/authenticate.js';
 import { setIo } from './realtime.js';
 
 import authRoutes from './routes/auth.js';
+import staffRoutes from './routes/staff.js';
 import dbRoutes from './routes/db.js';
 import uploadRoutes from './routes/upload.js';
 import whatsappRoutes from './routes/whatsapp.js';
@@ -33,6 +34,7 @@ async function main() {
     app.get('/health', (_req, res) => res.json({ ok: true }));
 
     app.use('/api/auth', authRoutes);
+    app.use('/api/staff', staffRoutes);
     app.use('/api/db', dbRoutes);
     app.use('/api/upload', uploadRoutes);
     app.use('/api/whatsapp', whatsappRoutes);

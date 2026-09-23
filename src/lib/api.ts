@@ -239,65 +239,20 @@ export async function getStaff() {
     return data as any[];
 }
 
-export async function createStaff(user: any, _password?: string) {
-    console.log('API: createStaff (Simplified) initiated for', user.email);
-    const staffId = (user.id || crypto.randomUUID()) as any;
-
-    // Direct database insertion only - bypassing Supabase Auth
-    const { data: staffData, error: staffError } = await supabase
-        .from('staffs')
-        .insert([{
-            id: staffId,
-            email: user.email,
-            full_name: user.full_name,
-            role: user.role,
-            avatar_url: user.avatar_url || null,
-            department: user.department || null,
-            phone: user.phone || null,
-            status: 'active',
-        }])
-        .select()
-        .single();
-
-    if (staffError) throw staffError;
-
-    // Sync to profiles table for lead assignments
-    try {
-        await supabase.from('profiles').upsert([{
-            id: staffId,
-            full_name: user.full_name,
-            email: user.email,
-            role: user.role,
-        }]);
-    } catch (_) {
-    }
-
-    return { data: staffData };
+async function saveStaffAccount(path: string, method: string, data: any) {
+    const response = await fetch(API_BASE + '/api/staff' + path, {
+        method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getAuthToken() },
+        body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to save staff');
+    return result;
 }
-
+export async function createStaff(user: any, password?: string) {
+    return { data: await saveStaffAccount('', 'POST', { ...user, password }) };
+}
 export async function updateStaff(id: string, updates: any) {
-    const { data, error } = await supabase
-        .from('staffs')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-
-    if (error) throw error;
-
-    // Sync to profiles table
-    try {
-        const profileUpdates: any = {};
-        if (updates.full_name) profileUpdates.full_name = updates.full_name;
-        if (updates.email) profileUpdates.email = updates.email;
-        if (updates.role) profileUpdates.role = updates.role;
-        if (Object.keys(profileUpdates).length > 0) {
-            await supabase.from('profiles').update(profileUpdates).eq('id', id);
-        }
-    } catch (_) {
-    }
-
-    return data;
+    return saveStaffAccount('/' + id, 'PATCH', updates);
 }
 
 export async function deleteStaff(id: string) {

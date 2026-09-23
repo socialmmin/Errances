@@ -36,7 +36,7 @@ export function Leads() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedLead, setSelectedLead] = useState<Lead | undefined>(undefined);
     const [whatsappLead, setWhatsappLead] = useState<Lead | null>(null);
-    const [quickAddPreset, setQuickAddPreset] = useState<{ source?: string; phone?: string; name?: string } | null>(null);
+    const [quickAddPreset, setQuickAddPreset] = useState<{ source?: string; phone?: string; name?: string; tour?: string } | null>(null);
 
     useEffect(() => {
         fetchLeads();
@@ -47,10 +47,10 @@ export function Leads() {
 
     // Opened via Quick Add / "Create WhatsApp Lead" elsewhere in the app (navigate('/leads', { state: {...} }))
     useEffect(() => {
-        const state = location.state as { openAdd?: boolean; presetSource?: string; presetPhone?: string; presetName?: string } | null;
+        const state = location.state as { openAdd?: boolean; presetSource?: string; presetPhone?: string; presetName?: string; presetTour?: string } | null;
         if (state?.openAdd) {
             setSelectedLead(undefined);
-            setQuickAddPreset({ source: state.presetSource, phone: state.presetPhone, name: state.presetName });
+            setQuickAddPreset({ source: state.presetSource, phone: state.presetPhone, name: state.presetName, tour: state.presetTour });
             setIsDialogOpen(true);
             window.history.replaceState({}, document.title);
         }
@@ -265,6 +265,7 @@ export function Leads() {
                         presetSource={quickAddPreset?.source}
                         presetPhone={quickAddPreset?.phone}
                         presetName={quickAddPreset?.name}
+                        presetTour={quickAddPreset?.tour}
                     />
                 </DialogContent>
             </Dialog>

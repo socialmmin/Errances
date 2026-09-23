@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,11 +17,11 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
     return (
         <Card className="overflow-hidden border-none bg-white/70 backdrop-blur-sm shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col h-full rounded-3xl ring-1 ring-slate-200/50">
             <div className="relative h-56 overflow-hidden bg-slate-100">
-                <img
-                    src={tour.images[0]}
+                {tour.images?.[0] ? <img
+                    src={tour.images?.[0]}
                     alt={tour.title}
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                />
+                /> : <div className="h-full flex items-center justify-center text-slate-400"><MapPin className="h-10 w-10" /></div>}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="absolute top-3 right-3">
                     <Badge className={cn(
@@ -33,7 +34,7 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
                 <div className="absolute bottom-3 left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0">
                     <div className="flex items-center text-white font-black text-xl">
                         <Euro className="w-5 h-5" />
-                        {tour.price.toLocaleString()}
+                        {Number(tour.price).toLocaleString()}
                     </div>
                 </div>
             </div>
@@ -54,19 +55,21 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
                 <CardDescription className="line-clamp-2 text-xs font-medium text-slate-500 mb-4 leading-relaxed">
                     {tour.description}
                 </CardDescription>
-                <div className="flex items-center gap-4">
+                <p className="text-lg font-semibold text-slate-900 mb-3">€{Number(tour.price).toLocaleString()} <span className="text-xs font-normal text-slate-500">per person</span></p>
+                <div className="flex flex-wrap items-center gap-2">
                     <div className="flex items-center bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
                         <Clock className="w-3 h-3 mr-1.5 text-indigo-500" />
                         <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{tour.duration} Days</span>
                     </div>
                     <div className="flex items-center bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
                         <Calendar className="w-3 h-3 mr-1.5 text-emerald-500" />
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Daily dept.</span>
+                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{tour.availability || 'Dates to confirm'}</span>
                     </div>
                 </div>
             </CardContent>
             <CardFooter className="pt-0 pb-6 px-6">
-                <div className="flex gap-2 w-full">
+                <div className="flex flex-wrap gap-2 w-full">
+                    <Button asChild variant="outline" className="w-full"><Link to={`/tours/${tour.id}`}>View details</Link></Button>
                     {isAdmin && (
                         <>
                             <Button
@@ -76,6 +79,7 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
                                 Edit Package
                             </Button>
                             <Button
+                                aria-label={`Delete ${tour.title}`}
                                 variant="ghost"
                                 className="h-10 w-10 p-0 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100"
                                 onClick={() => onDelete?.(tour.id)}

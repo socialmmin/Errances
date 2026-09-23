@@ -25,6 +25,9 @@ const PAGE_TITLES: Array<{ test: (path: string) => boolean; title: string }> = [
     { test: (p) => p === '/contacts', title: 'Contacts' },
     { test: (p) => p.startsWith('/tours'), title: 'Tour Packages' },
     { test: (p) => p === '/whatsapp', title: 'WhatsApp Inbox' },
+    { test: (p) => p === '/whatsapp/templates', title: 'WhatsApp Templates' },
+    { test: (p) => p === '/settings/whatsapp', title: 'WhatsApp Settings' },
+    { test: (p) => p === '/settings', title: 'Settings' },
     { test: (p) => p === '/analytics', title: 'Analytics' },
     { test: (p) => /^\/staff\/[^/]+$/.test(p), title: 'Staff Profile' },
     { test: (p) => p === '/staff', title: 'Staff' },
@@ -63,7 +66,7 @@ export function TopNav() {
 
     return (
         <>
-            <header className="sticky top-0 z-30 flex items-center gap-3 h-16 px-4 md:px-6 bg-white/70 backdrop-blur-xl border-b border-slate-200/70">
+            <header className="sticky top-0 z-30 flex items-center gap-3 h-16 shrink-0 px-4 md:px-6 bg-white/70 backdrop-blur-xl border-b border-slate-200/70">
                 {/* mobile menu spacer handled by Sidebar's own trigger; leave gap for it */}
                 <div className="md:hidden w-8 flex-shrink-0" />
 

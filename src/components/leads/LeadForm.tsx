@@ -83,6 +83,7 @@ interface LeadFormProps {
     /** Prefills phone + WhatsApp number, e.g. when creating a lead from an unmatched WhatsApp conversation. Ignored when editing. */
     presetPhone?: string;
     presetName?: string;
+    presetTour?: string;
 }
 
 function parseLegacyNotes(notes?: string) {
@@ -105,7 +106,7 @@ function parseLegacyNotes(notes?: string) {
     return parsed;
 }
 
-export function LeadForm({ initialData, onSubmit, onCancel, onViewExisting, presetSource, presetPhone, presetName }: LeadFormProps) {
+export function LeadForm({ initialData, onSubmit, onCancel, onViewExisting, presetSource, presetPhone, presetName, presetTour }: LeadFormProps) {
     const { tours, staff, fetchStaff, leadStatuses, fetchLeadStatuses } = useAppStore();
     const [duplicate, setDuplicate] = useState<any>(null);
     const [checkingDuplicate, setCheckingDuplicate] = useState(false);
@@ -150,7 +151,7 @@ export function LeadForm({ initialData, onSubmit, onCancel, onViewExisting, pres
         } : {
             name: presetName || '', email: '', phone: presetPhone || '', whatsapp_number: presetPhone || '',
             status: 'new', priority: 'medium', source: presetSource || 'Website', campaign: '',
-            tour_interest: '', requirement: '', budget: undefined, expected_closing_date: '',
+            tour_interest: presetTour || '', requirement: '', budget: undefined, expected_closing_date: '',
             assigned_staff_id: '', lead_owner_id: '',
             dob: '', gender: '', passport_number: '', photo_url: '',
             address: '', city: '', state: '', country: '', pincode: '',

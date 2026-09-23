@@ -275,17 +275,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             console.error('Failed to add tour:', error);
             toast.error(`Failed to add tour: ${error instanceof Error ? error.message : 'Unknown error'}`);
             set({ isLoading: false });
+            throw error;
         }
     },
     updateTour: async (id, updates) => {
         try {
-            set((state) => ({
-                tours: state.tours.map((t) => (t.id === id ? { ...t, ...updates } : t))
-            }));
-            await api.updateTour(id, updates);
+            const saved = await api.updateTour(id, updates);
+            set(state => ({ tours: state.tours.map(t => t.id === id ? saved : t) }));
         } catch (error) {
             console.error('Failed to update tour:', error);
-            get().fetchTours();
+            throw error;
         }
     },
     deleteTour: async (id) => {
@@ -328,19 +327,18 @@ export const useAppStore = create<AppState>((set, get) => ({
             console.error('Failed to add staff:', error);
             toast.error(error instanceof Error ? error.message : 'Failed to add staff member');
             set({ isLoading: false });
+            throw error;
         }
     },
     updateStaff: async (id, updates) => {
         try {
-            set((state) => ({
-                staff: state.staff.map((s) => (s.id === id ? { ...s, ...updates } : s))
-            }));
-            await api.updateStaff(id, updates);
+            const saved = await api.updateStaff(id, updates);
+            set(state => ({ staff: state.staff.map(s => s.id === id ? saved : s) }));
             toast.success('Staff updated successfully');
         } catch (error) {
             console.error('Failed to update staff:', error);
-            toast.error('Failed to update staff');
-            get().fetchStaff();
+            toast.error(error instanceof Error ? error.message : 'Failed to update staff');
+            throw error;
         }
     },
     deleteStaff: async (id) => {

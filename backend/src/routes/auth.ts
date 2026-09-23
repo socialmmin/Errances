@@ -14,7 +14,7 @@ router.post('/login', async (req, res) => {
     }
 
     const { rows } = await pool.query(
-        'SELECT * FROM staffs WHERE email = $1 OR access_key = $1',
+        'SELECT * FROM staffs WHERE lower(email) = lower($1) OR lower(access_key) = lower($1)',
         [identifier]
     );
     const staff = rows[0];

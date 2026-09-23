@@ -206,6 +206,12 @@ export type TourPackage = {
     duration: number; // days
     description: string;
     itinerary: any; // Rich text content
+    departure_city?: string;
+    availability?: string;
+    accommodation?: string;
+    meals?: string;
+    transport?: string;
+    cancellation_policy?: string;
     inclusions?: string[];
     exclusions?: string[];
     images: string[];

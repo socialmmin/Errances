@@ -1,5 +1,5 @@
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/components/AuthProvider';
 import { I18nProvider } from '@/components/I18nProvider';
 import { Layout } from '@/components/layout/Layout';
@@ -75,6 +75,7 @@ function AppRoutes() {
         <Route path="settings/whatsapp" element={
           (user?.role === 'admin' || user?.role === 'sales_manager') ? <WhatsAppSettings /> : <Navigate to="/" replace />
         } />
+        <Route path="*" element={<div className="py-20 text-center space-y-4"><h1 className="text-2xl font-semibold">Page not found</h1><Link className="text-teal-700 underline" to="/">Return to dashboard</Link></div>} />
       </Route>
     </Routes>
   );

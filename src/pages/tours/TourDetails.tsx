@@ -1,146 +1,227 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { useAppStore } from '@/store';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
-import { ArrowLeft, Clock, MapPin, Euro, Calendar, Check, X } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import DOMPurify from "dompurify";
+import { useAppStore } from "@/store";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  ArrowLeft,
+  Clock,
+  MapPin,
+  Check,
+  X,
+  Image as ImageIcon,
+} from "lucide-react";
 
 export function TourDetails() {
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const { tours } = useAppStore();
-
-    const tour = tours.find(t => t.id === id);
-
-    if (!tour) {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
-                <h2 className="text-2xl font-bold text-slate-900">Tour Package Not Found</h2>
-                <Button onClick={() => navigate('/tours')}>Back to Tours</Button>
-            </div>
-        );
-    }
-
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { tours, fetchTours } = useAppStore();
+  const [loading, setLoading] = useState(true);
+  const [imageIndex, setImageIndex] = useState(0);
+  useEffect(() => {
+    let active = true;
+    fetchTours().finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [fetchTours]);
+  const tour = tours.find((t) => t.id === id);
+  if (!tour)
     return (
-        <div className="space-y-8 animate-in fade-in duration-500 pb-12">
-            <div className="flex items-center gap-4">
-                <Button variant="ghost" size="icon" onClick={() => navigate('/tours')}>
-                    <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                        <h2 className="text-3xl font-bold tracking-tight text-slate-900">{tour.title}</h2>
-                        <Badge variant={tour.status === 'active' ? 'default' : 'secondary'} className={tour.status === 'active' ? 'bg-green-600' : ''}>
-                            {tour.status}
-                        </Badge>
-                    </div>
-                    <div className="flex items-center text-slate-500 mt-1">
-                        <MapPin className="w-4 h-4 mr-1" />
-                        {tour.destination}
-                    </div>
-                </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => navigate(`/tours/${tour.id}/edit`)}>Edit Package</Button>
-                    <Button className="bg-red-600 hover:bg-red-700">Book Now</Button>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Left Column - Main Content */}
-                <div className="lg:col-span-2 space-y-8">
-                    {/* Image Gallery */}
-                    <div className="aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shadow-sm">
-                        <img src={tour.images[0]} alt={tour.title} className="w-full h-full object-cover" />
-                    </div>
-
-                    {/* Description */}
-                    <Card className="border-slate-100 shadow-sm">
-                        <CardContent className="pt-6">
-                            <h3 className="text-xl font-semibold mb-4 text-slate-900">About this Tour</h3>
-                            <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{tour.description}</p>
-                        </CardContent>
-                    </Card>
-
-                    {/* Itinerary */}
-                    <Card className="border-slate-100 shadow-sm">
-                        <CardContent className="pt-6">
-                            <h3 className="text-xl font-semibold mb-4 text-slate-900">Itinerary</h3>
-                            <div
-                                className="prose prose-slate max-w-none text-slate-600"
-                                dangerouslySetInnerHTML={{ __html: tour.itinerary }}
-                            />
-                        </CardContent>
-                    </Card>
-                </div>
-
-                {/* Right Column - Sidebar */}
-                <div className="space-y-6">
-                    <Card className="border-slate-100 shadow-md sticky top-8">
-                        <CardContent className="pt-6 space-y-6">
-                            <div className="pb-6 border-b border-slate-100">
-                                <p className="text-sm text-slate-500 mb-1">Price per person</p>
-                                <div className="flex items-baseline gap-1">
-                                    <Euro className="w-5 h-5 text-slate-900 self-center" />
-                                    <span className="text-3xl font-bold text-slate-900">{tour.price.toLocaleString()}</span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center text-slate-600">
-                                        <Clock className="w-4 h-4 mr-2" />
-                                        Duration
-                                    </div>
-                                    <span className="font-medium text-slate-900">{tour.duration} Days</span>
-                                </div>
-                                <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center text-slate-600">
-                                        <Calendar className="w-4 h-4 mr-2" />
-                                        Availability
-                                    </div>
-                                    <span className="font-medium text-slate-900">Daily Departures</span>
-                                </div>
-                            </div>
-
-                            <div className="pt-4 space-y-3">
-                                <h4 className="font-semibold text-sm text-slate-900">Includes</h4>
-                                <ul className="space-y-2">
-                                    <li className="flex items-start text-sm text-slate-600">
-                                        <Check className="w-4 h-4 mr-2 text-green-500 shrink-0 mt-0.5" />
-                                        Accommodation as per itinerary
-                                    </li>
-                                    <li className="flex items-start text-sm text-slate-600">
-                                        <Check className="w-4 h-4 mr-2 text-green-500 shrink-0 mt-0.5" />
-                                        Daily breakfast & select meals
-                                    </li>
-                                    <li className="flex items-start text-sm text-slate-600">
-                                        <Check className="w-4 h-4 mr-2 text-green-500 shrink-0 mt-0.5" />
-                                        Professional tour guide
-                                    </li>
-                                </ul>
-                            </div>
-
-                            <div className="pt-2 space-y-3">
-                                <h4 className="font-semibold text-sm text-slate-900">Excludes</h4>
-                                <ul className="space-y-2">
-                                    <li className="flex items-start text-sm text-slate-600">
-                                        <X className="w-4 h-4 mr-2 text-red-500 shrink-0 mt-0.5" />
-                                        International flights
-                                    </li>
-                                    <li className="flex items-start text-sm text-slate-600">
-                                        <X className="w-4 h-4 mr-2 text-red-500 shrink-0 mt-0.5" />
-                                        Personal expenses
-                                    </li>
-                                </ul>
-                            </div>
-
-                            <Button className="w-full bg-red-600 hover:bg-red-700 h-11 text-base">
-                                Book This Tour
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </div>
-            </div>
-        </div>
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+        <h2 className="text-xl font-semibold">
+          {loading ? "Loading package…" : "Package not found"}
+        </h2>
+        <Button onClick={() => navigate("/tours")}>Back to packages</Button>
+      </div>
     );
+  const enquiry = () =>
+    navigate("/leads", {
+      state: { openAdd: true, presetTour: tour.title, presetSource: "Website" },
+    });
+  const images = tour.images || [];
+  const details = [
+    ["Departure city", tour.departure_city],
+    ["Availability", tour.availability],
+    ["Accommodation", tour.accommodation],
+    ["Meals", tour.meals],
+    ["Transport", tour.transport],
+  ];
+  return (
+    <div className="space-y-6 pb-8">
+      <div className="flex flex-wrap items-start gap-3">
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Back to packages"
+          onClick={() => navigate("/tours")}
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-[180px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold text-slate-900">{tour.title}</h1>
+            <Badge variant="secondary">{tour.status}</Badge>
+          </div>
+          <p className="flex items-center gap-1 mt-2 text-slate-500">
+            <MapPin className="h-4 w-4" />
+            {tour.destination}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/tours/${tour.id}/edit`)}
+          >
+            Edit package
+          </Button>
+          <Button onClick={enquiry}>Create enquiry</Button>
+        </div>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2 min-w-0">
+          <div className="space-y-3">
+            <div className="aspect-video rounded-2xl overflow-hidden bg-slate-100 flex items-center justify-center">
+              {images.length ? (
+                <img
+                  src={images[imageIndex] || images[0]}
+                  alt={tour.title}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="text-slate-400 text-center">
+                  <ImageIcon className="h-12 w-12 mx-auto mb-2" />
+                  <p>Add package photos in Edit package</p>
+                </div>
+              )}
+            </div>
+            {images.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {images.map((src, i) => (
+                  <button
+                    key={i}
+                    aria-label={`View photo ${i + 1}`}
+                    aria-pressed={imageIndex === i}
+                    onClick={() => setImageIndex(i)}
+                    className={`shrink-0 rounded-lg overflow-hidden border-2 ${imageIndex === i ? "border-teal-600" : "border-transparent"}`}
+                  >
+                    <img src={src} alt="" className="h-16 w-24 object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Card>
+            <CardContent className="pt-6">
+              <h2 className="text-lg font-semibold mb-3">Package overview</h2>
+              <p className="whitespace-pre-wrap text-slate-600 leading-relaxed">
+                {tour.description}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <h2 className="text-lg font-semibold mb-4">Travel details</h2>
+              <dl className="grid gap-5 sm:grid-cols-2">
+                {details.map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-sm text-slate-500">{label}</dt>
+                    <dd className="mt-1 whitespace-pre-wrap font-medium text-slate-800">
+                      {value || "Not specified"}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <h2 className="text-lg font-semibold mb-4">
+                Day-by-day itinerary
+              </h2>
+              {tour.itinerary ? (
+                <div
+                  className="prose prose-slate max-w-none break-words [&_img]:max-w-full"
+                  dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(String(tour.itinerary)),
+                  }}
+                />
+              ) : (
+                <p className="text-slate-500">
+                  Add the daily activities and travel plan in Edit package.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <h2 className="text-lg font-semibold mb-3">
+                Booking & cancellation terms
+              </h2>
+              <p className="text-slate-600 whitespace-pre-wrap">
+                {tour.cancellation_policy ||
+                  "Terms have not been added yet. Confirm them before booking."}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+        <div className="space-y-6 min-w-0">
+          <Card>
+            <CardContent className="pt-6 space-y-6">
+              <div>
+                <p className="text-sm text-slate-500">Price per person</p>
+                <p className="text-3xl font-bold mt-1">
+                  {new Intl.NumberFormat("en-IE", {
+                    style: "currency",
+                    currency: "EUR",
+                  }).format(Number(tour.price))}
+                </p>
+              </div>
+              <p className="flex items-center gap-2 text-slate-600">
+                <Clock className="w-4 h-4" />
+                {tour.duration} days
+              </p>
+              <Button className="w-full" onClick={enquiry}>
+                Create enquiry for this package
+              </Button>
+              <p className="text-xs text-slate-500">
+                Opens a new lead with this package already selected.
+              </p>
+            </CardContent>
+          </Card>
+          {(["inclusions", "exclusions"] as const).map((key) => (
+            <Card key={key}>
+              <CardContent className="pt-6">
+                <h2 className="font-semibold mb-4">
+                  {key === "inclusions" ? "Included" : "Not included"}
+                </h2>
+                {tour[key]?.length ? (
+                  <ul className="space-y-3">
+                    {tour[key]!.map((item, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-slate-600">
+                        {key === "inclusions" ? (
+                          <Check className="h-4 w-4 shrink-0 text-teal-600" />
+                        ) : (
+                          <X className="h-4 w-4 shrink-0 text-rose-500" />
+                        )}
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Not specified. Add details in Edit package.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }

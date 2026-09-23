@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifyToken, type JwtPayload } from '../auth/jwt.js';
+import { pool } from '../db.js';
 
 declare global {
     // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -10,11 +11,13 @@ declare global {
     }
 }
 
-export function authenticate(req: Request, _res: Response, next: NextFunction) {
+export async function authenticate(req: Request, _res: Response, next: NextFunction) {
     const header = req.headers.authorization;
     if (header?.startsWith('Bearer ')) {
         try {
-            req.user = verifyToken(header.slice(7));
+            const payload = verifyToken(header.slice(7));
+            const { rows } = await pool.query('SELECT email,role,status FROM staffs WHERE id=$1', [payload.sub]);
+            if (rows[0]?.status === 'active') req.user = { ...payload, email: rows[0].email, role: rows[0].role };
         } catch {
             // Invalid/expired token — treat as anonymous, routes decide if that's allowed.
         }

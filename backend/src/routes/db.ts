@@ -32,15 +32,15 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: authed,
     },
     tours: {
-        columns: ['id', 'title', 'destination', 'price', 'duration', 'description', 'itinerary', 'inclusions', 'exclusions', 'images', 'status', 'created_at'],
+        columns: ['id', 'title', 'destination', 'price', 'duration', 'description', 'itinerary', 'departure_city', 'availability', 'accommodation', 'meals', 'transport', 'cancellation_policy', 'inclusions', 'exclusions', 'images', 'status', 'created_at'],
         canRead: authed,
         canWrite: authed,
         canDelete: authed,
     },
     staffs: {
-        columns: ['id', 'email', 'access_key', 'full_name', 'role', 'avatar_url', 'department', 'phone', 'status', 'password_hash', 'created_at'],
+        columns: ['id', 'email', 'access_key', 'full_name', 'role', 'avatar_url', 'department', 'phone', 'status', 'created_at'],
         canRead: authed,
-        canWrite: isAdmin,
+        canWrite: () => false,
         canDelete: isAdmin,
     },
     profiles: {
@@ -123,6 +123,14 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: authed,
     },
 };
+
+const jsonColumns: Record<string, string[]> = {
+    tours: ['itinerary'], leads: ['enquiry_data'], whatsapp_conversations: ['automation_data'],
+    whatsapp_templates: ['variables', 'buttons', 'sample_values'], lead_activities: ['metadata'], user_activity: ['metadata'],
+};
+function databaseValue(table: string, column: string, value: any) {
+    return value != null && jsonColumns[table]?.includes(column) ? JSON.stringify(value) : value;
+}
 
 function getTable(req: Request, res: Response): TableConfig | null {
     const table = TABLES[req.params.table];
@@ -292,7 +300,7 @@ router.post('/:table', requireAuth, async (req, res) => {
         for (const row of rows) {
             const cols = Object.keys(row).filter((c) => table.columns.includes(c));
             if (cols.length === 0) continue;
-            const values = cols.map((c) => row[c]);
+            const values = cols.map((c) => databaseValue(req.params.table, c, row[c]));
             const placeholders = cols.map((_, i) => `$${i + 1}`);
             const sql = `INSERT INTO "${req.params.table}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
             const result = await pool.query(sql, values);
@@ -341,7 +349,7 @@ router.patch('/:table', requireAuth, async (req, res) => {
         }
 
         const setClause = cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ');
-        const setParams = cols.map((c) => values[c]);
+        const setParams = cols.map((c) => databaseValue(req.params.table, c, values[c]));
         const { where, params: whereParams } = buildWhere(eq, inList, cols.length + 1);
 
         const sql = `UPDATE "${req.params.table}" SET ${setClause} ${where} RETURNING *`;
@@ -377,7 +385,7 @@ router.put('/:table', requireAuth, async (req, res) => {
         for (const row of rows) {
             const cols = Object.keys(row).filter((c) => table.columns.includes(c));
             if (cols.length === 0) continue;
-            const values = cols.map((c) => row[c]);
+            const values = cols.map((c) => databaseValue(req.params.table, c, row[c]));
             const placeholders = cols.map((_, i) => `$${i + 1}`);
             const updateSet = cols.filter((c) => c !== onConflict).map((c) => `"${c}" = EXCLUDED."${c}"`).join(', ');
             const sql = `INSERT INTO "${req.params.table}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders.join(', ')})
@@ -404,7 +412,7 @@ router.delete('/:table', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'Refusing to delete without a filter' });
         }
         const { where, params } = buildWhere(eq, inList);
-        const sql = `DELETE FROM "${req.params.table}" ${where} RETURNING *`;
+        const sql = `DELETE FROM "${req.params.table}" ${where} RETURNING ${table.columns.map(c => `"${c}"`).join(', ')}`;
         const result = await pool.query(sql, params);
 
         for (const row of result.rows) {

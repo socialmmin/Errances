@@ -253,14 +253,14 @@ export function Login() {
                         <form onSubmit={handleLogin} className="space-y-4" noValidate>
                             <div>
                                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 pl-1">
-                                    Access Key / User ID
+                                    Login ID / Email
                                 </label>
                                 <div className="relative mt-1.5">
                                     <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                                     <input
                                         type="text"
                                         autoComplete="username"
-                                        placeholder="EMP-001, email or mobile number"
+                                        placeholder="Your login ID or email"
                                         className="w-full h-11 pl-10 pr-4 bg-white/80 border border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 rounded-xl font-semibold text-slate-800 text-sm placeholder:text-slate-400 placeholder:font-medium transition-all outline-none shadow-sm"
                                         value={identifier}
                                         onChange={(e) => setIdentifier(e.target.value)}
