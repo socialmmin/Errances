@@ -803,7 +803,7 @@ export function WhatsApp() {
             </section>
             <aside
               className={cn(
-                "w-full lg:w-[260px] xl:w-[280px] shrink-0 border-l border-slate-200 overflow-y-auto",
+                "w-full md:w-auto md:flex-1 lg:flex-none lg:w-[260px] xl:w-[280px] min-w-0 shrink-0 border-l border-slate-200 overflow-y-auto",
                 details ? "block" : "hidden xl:block",
               )}
             >
