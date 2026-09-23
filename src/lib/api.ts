@@ -435,6 +435,61 @@ export async function updateWhatsAppSettings(payload: { businessName?: string; d
     return response.json();
 }
 
+// --- WhatsApp template lifecycle (backed by Twilio Content API — never write these
+// tables directly via supabase.from(), the backend keeps Twilio + DB in sync) ---
+
+async function whatsappFetch(path: string, options: RequestInit = {}) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(options.headers || {}),
+        },
+    });
+    if (!response.ok) {
+        let errMsg = 'Request failed';
+        try { errMsg = (await response.json()).error || errMsg; } catch (_) {}
+        throw new Error(errMsg);
+    }
+    return response.json();
+}
+
+export function getWhatsAppTemplates() {
+    return whatsappFetch('/api/whatsapp/templates');
+}
+
+export function syncWhatsAppTemplates() {
+    return whatsappFetch('/api/whatsapp/templates/sync', { method: 'POST' });
+}
+
+export function createWhatsAppTemplate(payload: {
+    name: string; language: string; category: string; body: string;
+    headerText?: string; footerText?: string;
+    buttonType?: 'none' | 'quick_reply' | 'call_to_action';
+    buttons?: Array<{ type: string; title: string; url?: string; phone?: string }>;
+    sampleValues?: Record<string, string>;
+}) {
+    return whatsappFetch('/api/whatsapp/templates', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function submitWhatsAppTemplate(templateId: string, category: string) {
+    return whatsappFetch(`/api/whatsapp/templates/${templateId}/submit`, { method: 'POST', body: JSON.stringify({ category }) });
+}
+
+export function refreshWhatsAppTemplateStatus(templateId: string) {
+    return whatsappFetch(`/api/whatsapp/templates/${templateId}/refresh-status`, { method: 'POST' });
+}
+
+export function setWhatsAppTemplateActive(templateId: string, isActive: boolean) {
+    return whatsappFetch(`/api/whatsapp/templates/${templateId}/active`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+export function deleteWhatsAppTemplate(templateId: string) {
+    return whatsappFetch(`/api/whatsapp/templates/${templateId}`, { method: 'DELETE' });
+}
+
 export async function deleteWhatsAppMessage(id: string) {
     const { error } = await supabase
         .from('whatsapp_messages')

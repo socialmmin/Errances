@@ -10,10 +10,15 @@ import {
     getOrCreateConversation, getConversationByPhone, recordOutboundMessage,
     isWithinSessionWindow, markConversationRead,
 } from '../services/whatsappMessageService.js';
+import {
+    syncTemplatesFromTwilio, createTemplate, submitTemplateForApproval,
+    refreshTemplateStatus, setTemplateActive, deleteTemplate,
+} from '../services/whatsappTemplateService.js';
 
 const router = Router();
 
 const sendLimiter = rateLimit({ windowMs: 60_000, max: 60, keyFn: (req) => `send:${req.user?.sub || req.ip}` });
+const templateSyncLimiter = rateLimit({ windowMs: 60_000, max: 5, keyFn: (req) => `template-sync:${req.user?.sub || req.ip}` });
 
 function canManageWhatsapp(role?: string) {
     return role === 'admin' || role === 'sales_manager';
@@ -133,6 +138,102 @@ router.patch('/conversations/:id/status', requireAuth, async (req, res) => {
         res.json({ data: rows[0] });
     } catch (err: any) {
         res.status(500).json({ error: err.message || 'Failed to update conversation status' });
+    }
+});
+
+// --- Template management ---
+async function auditTemplateAction(userId: string, action: string, metadata: Record<string, any>) {
+    try {
+        await pool.query(
+            `INSERT INTO user_activity (user_id, event_type, metadata) VALUES ($1, $2, $3)`,
+            [userId, `whatsapp_template_${action}`, JSON.stringify(metadata)]
+        );
+    } catch (err) {
+        console.error('[whatsapp] template audit log failed:', err);
+    }
+}
+
+router.get('/templates', requireAuth, async (_req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM whatsapp_templates ORDER BY created_at DESC');
+        res.json({ data: rows });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to load templates' });
+    }
+});
+
+router.post('/templates/sync', requireAuth, templateSyncLimiter, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const result = await syncTemplatesFromTwilio(req.user!.sub, req.user!.email);
+        await auditTemplateAction(req.user!.sub, 'sync', { synced: result.synced });
+        res.json(result);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to sync templates from Twilio' });
+    }
+});
+
+router.post('/templates', requireAuth, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    const { name, language, category, body, headerText, footerText, buttonType, buttons, sampleValues } = req.body || {};
+    if (!name || !language || !category || !body) {
+        return res.status(400).json({ error: 'Missing name, language, category, or body' });
+    }
+    try {
+        const template = await createTemplate({
+            name, language, category, body, headerText, footerText, buttonType, buttons, sampleValues,
+            createdBy: req.user!.sub, createdByName: req.user!.email,
+        });
+        await auditTemplateAction(req.user!.sub, 'created', { templateId: template.id, name: template.name });
+        res.json({ data: template });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to create template' });
+    }
+});
+
+router.post('/templates/:id/submit', requireAuth, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    const { category } = req.body || {};
+    if (!category) return res.status(400).json({ error: 'Missing category' });
+    try {
+        const template = await submitTemplateForApproval(req.params.id, category);
+        await auditTemplateAction(req.user!.sub, 'submitted', { templateId: template.id, category });
+        res.json({ data: template });
+    } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to submit template for approval' });
+    }
+});
+
+router.post('/templates/:id/refresh-status', requireAuth, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const template = await refreshTemplateStatus(req.params.id);
+        res.json({ data: template });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to refresh template status' });
+    }
+});
+
+router.patch('/templates/:id/active', requireAuth, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    const { isActive } = req.body || {};
+    try {
+        const template = await setTemplateActive(req.params.id, Boolean(isActive));
+        await auditTemplateAction(req.user!.sub, isActive ? 'activated' : 'deactivated', { templateId: template.id });
+        res.json({ data: template });
+    } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to update template' });
+    }
+});
+
+router.delete('/templates/:id', requireAuth, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        await deleteTemplate(req.params.id);
+        await auditTemplateAction(req.user!.sub, 'deleted', { templateId: req.params.id });
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to delete template' });
     }
 });
 

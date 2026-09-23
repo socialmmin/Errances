@@ -150,6 +150,8 @@ export type WhatsAppMessageRecord = {
     created_at: string;
 };
 
+export type WhatsAppTemplateStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'paused' | 'disabled';
+
 export type WhatsAppTemplate = {
     id: string;
     name: string;
@@ -159,9 +161,18 @@ export type WhatsAppTemplate = {
     body_preview: string | null;
     variables: string[];
     is_active: boolean;
+    status: WhatsAppTemplateStatus;
+    rejection_reason: string | null;
+    content_type: string;
+    header_text: string | null;
+    footer_text: string | null;
+    buttons: Array<{ type: string; title: string; url?: string; phone?: string }>;
+    sample_values: Record<string, string>;
+    synced_at: string | null;
     created_by?: string | null;
     created_by_name?: string | null;
     created_at: string;
+    updated_at: string;
 };
 
 export type WhatsAppSettings = {

@@ -797,7 +797,7 @@ export function WhatsApp() {
 
     // Load active approved templates once — used by the template picker below.
     useEffect(() => {
-        supabase.from('whatsapp_templates').select('*').eq('is_active', true).order('created_at', { ascending: false })
+        supabase.from('whatsapp_templates').select('*').eq('is_active', true).eq('status', 'approved').order('created_at', { ascending: false })
             .then(({ data, error }: any) => { if (!error && data) setTemplates(data); })
             .catch(() => {});
     }, []);

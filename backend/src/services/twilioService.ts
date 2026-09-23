@@ -3,7 +3,7 @@ import { config, isTwilioConfigured } from '../config.js';
 
 let client: twilio.Twilio | null = null;
 
-function getClient(): twilio.Twilio {
+export function getClient(): twilio.Twilio {
     if (!client) client = twilio(config.twilio.accountSid, config.twilio.authToken);
     return client;
 }

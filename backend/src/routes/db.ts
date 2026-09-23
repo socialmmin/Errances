@@ -69,10 +69,16 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: authed,
     },
     whatsapp_templates: {
-        columns: ['id', 'name', 'twilio_content_sid', 'category', 'language', 'body_preview', 'variables', 'is_active', 'created_by', 'created_by_name', 'created_at'],
+        columns: [
+            'id', 'name', 'twilio_content_sid', 'category', 'language', 'body_preview', 'variables', 'is_active',
+            'status', 'rejection_reason', 'content_type', 'header_text', 'footer_text', 'buttons', 'sample_values',
+            'synced_at', 'created_by', 'created_by_name', 'created_at', 'updated_at',
+        ],
+        // Read-only here — creation/submission/sync must go through /api/whatsapp/templates so the
+        // local row always stays consistent with the actual Twilio Content resource it references.
         canRead: authed,
-        canWrite: canManageWhatsapp,
-        canDelete: canManageWhatsapp,
+        canWrite: () => false,
+        canDelete: () => false,
     },
     user_activity: {
         columns: ['id', 'user_id', 'event_type', 'page_path', 'metadata', 'created_at'],

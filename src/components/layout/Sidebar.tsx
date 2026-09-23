@@ -14,6 +14,7 @@ import {
     ChevronsRight,
     Compass,
     Settings,
+    LayoutList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -42,7 +43,13 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: { collapsed?: b
             ],
         },
         { label: 'Catalog', items: [{ label: t('tourPackages'), icon: Map, href: '/tours' }] },
-        { label: 'Engage', items: [{ label: t('whatsapp'), icon: MessageSquare, href: '/whatsapp' }] },
+        {
+            label: 'Engage',
+            items: [
+                { label: t('whatsapp'), icon: MessageSquare, href: '/whatsapp' },
+                { label: 'Templates', icon: LayoutList, href: '/whatsapp/templates' },
+            ],
+        },
         { label: 'Insights', items: [{ label: t('analytics'), icon: BarChart3, href: '/analytics' }] },
         ...(user?.role === 'admin' || user?.role === 'sales_manager' ? [{
             label: 'Admin',

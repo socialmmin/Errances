@@ -303,6 +303,21 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_table THEN NULL; WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Template lifecycle: local Content resources start as 'draft', move to 'pending' on
+-- submission, then 'approved'/'rejected' per WhatsApp's review (or 'paused'/'disabled'
+-- if Meta later suspends an approved template).
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved';
+ALTER TABLE whatsapp_templates DROP CONSTRAINT IF EXISTS whatsapp_templates_status_check;
+ALTER TABLE whatsapp_templates ADD CONSTRAINT whatsapp_templates_status_check CHECK (status IN ('draft', 'pending', 'approved', 'rejected', 'paused', 'disabled'));
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'twilio/text';
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_text TEXT;
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS footer_text TEXT;
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS buttons JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS sample_values JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
+ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 -- Singleton admin-configurable WhatsApp settings (never holds secrets — those stay in env vars).
 CREATE TABLE IF NOT EXISTS whatsapp_settings (
     id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),

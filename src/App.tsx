@@ -12,6 +12,7 @@ import { TourList } from '@/pages/tours/TourList';
 import { TourDetails } from '@/pages/tours/TourDetails';
 import { TourForm } from '@/pages/tours/TourForm';
 import { WhatsApp } from '@/pages/whatsapp/WhatsApp';
+import { Templates } from '@/pages/whatsapp/Templates';
 import { Leads } from '@/pages/leads/Leads';
 import { Contacts } from '@/pages/contacts/Contacts';
 import { LeadDetails } from '@/pages/leads/LeadDetails';
@@ -59,6 +60,7 @@ function AppRoutes() {
         <Route path="tours/:id" element={<TourDetails />} />
         <Route path="tours/:id/edit" element={<TourForm />} />
         <Route path="whatsapp" element={<WhatsApp />} />
+        <Route path="whatsapp/templates" element={<Templates />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="staff" element={
           user?.role === 'admin' ? <Staff /> : <Navigate to="/" replace />
