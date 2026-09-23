@@ -148,13 +148,16 @@ export function TopNav() {
                                 </div>
                             ) : (
                                 notifications.map((n) => (
-                                    <DropdownMenuItem key={n.id} onClick={() => navigate(`/leads/${n.leadId}`)} className="flex items-start gap-2.5 py-2.5">
-                                        <div className={cn('h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5', n.type === 'followup_overdue' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600')}>
-                                            {n.type === 'followup_overdue' ? <AlertTriangle className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+                                    <DropdownMenuItem key={n.id} onClick={() => navigate(n.link)} className="flex items-start gap-2.5 py-2.5">
+                                        <div className={cn(
+                                            'h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5',
+                                            n.type === 'followup_overdue' ? 'bg-red-50 text-red-600' : n.type === 'whatsapp_unread' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+                                        )}>
+                                            {n.type === 'followup_overdue' ? <AlertTriangle className="h-3.5 w-3.5" /> : n.type === 'whatsapp_unread' ? <MessageSquareText className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
                                         </div>
                                         <div className="min-w-0">
                                             <p className="text-xs font-bold text-slate-800 truncate">{n.title}</p>
-                                            <p className="text-[10px] text-slate-400 truncate">{format(new Date(n.dueDate), 'dd MMM yyyy')}</p>
+                                            <p className="text-[10px] text-slate-400 truncate">{n.type === 'whatsapp_unread' ? n.subtitle : format(new Date(n.dueDate), 'dd MMM yyyy')}</p>
                                         </div>
                                     </DropdownMenuItem>
                                 ))

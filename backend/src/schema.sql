@@ -239,6 +239,88 @@ CREATE TABLE IF NOT EXISTS whatsapp_conversations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- --- WhatsApp Business messaging service (Twilio) ---
+-- Idempotent upgrades to the tables above, which originally only backed the
+-- automated lead-capture bot. They now double as the general-purpose agent
+-- inbox's Conversation/Message entities (one whatsapp_conversations row per
+-- phone number, already enforced by its UNIQUE(phone) constraint).
+
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS contact_lead_id UUID REFERENCES leads(id) ON DELETE SET NULL;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS assigned_staff_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';
+DO $$ BEGIN
+    ALTER TABLE whatsapp_conversations ADD CONSTRAINT whatsapp_conversations_status_check CHECK (status IN ('open', 'pending', 'resolved'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS unread_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_message_preview TEXT;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_inbound_at TIMESTAMPTZ;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'twilio';
+
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS twilio_sid TEXT;
+DO $$ BEGIN
+    ALTER TABLE whatsapp_messages ADD CONSTRAINT whatsapp_messages_twilio_sid_key UNIQUE (twilio_sid);
+EXCEPTION WHEN duplicate_table THEN NULL; WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS conversation_id UUID REFERENCES whatsapp_conversations(id) ON DELETE SET NULL;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS direction TEXT;
+UPDATE whatsapp_messages SET direction = CASE WHEN sender = 'user' THEN 'outbound' ELSE 'inbound' END WHERE direction IS NULL;
+ALTER TABLE whatsapp_messages ALTER COLUMN direction SET NOT NULL;
+DO $$ BEGIN
+    ALTER TABLE whatsapp_messages ADD CONSTRAINT whatsapp_messages_direction_check CHECK (direction IN ('inbound', 'outbound'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'text';
+DO $$ BEGIN
+    ALTER TABLE whatsapp_messages ADD CONSTRAINT whatsapp_messages_message_type_check CHECK (message_type IN ('text', 'image', 'document', 'audio', 'video', 'template', 'location'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_content_type TEXT;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS error_code TEXT;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS sent_by UUID REFERENCES staffs(id) ON DELETE SET NULL;
+ALTER TABLE whatsapp_messages DROP CONSTRAINT IF EXISTS whatsapp_messages_status_check;
+ALTER TABLE whatsapp_messages ADD CONSTRAINT whatsapp_messages_status_check CHECK (status IN ('queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'undelivered'));
+
+-- Approved Twilio WhatsApp content templates agents can pick from.
+CREATE TABLE IF NOT EXISTS whatsapp_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    twilio_content_sid TEXT NOT NULL,
+    category TEXT DEFAULT 'utility',
+    language TEXT NOT NULL DEFAULT 'en',
+    body_preview TEXT,
+    variables JSONB NOT NULL DEFAULT '[]',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by UUID,
+    created_by_name TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+DO $$ BEGIN
+    ALTER TABLE whatsapp_templates ADD CONSTRAINT whatsapp_templates_content_sid_key UNIQUE (twilio_content_sid);
+EXCEPTION WHEN duplicate_table THEN NULL; WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Singleton admin-configurable WhatsApp settings (never holds secrets — those stay in env vars).
+CREATE TABLE IF NOT EXISTS whatsapp_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    business_name TEXT,
+    default_template_id UUID REFERENCES whatsapp_templates(id) ON DELETE SET NULL,
+    session_window_hours INTEGER NOT NULL DEFAULT 24,
+    updated_by UUID,
+    updated_by_name TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO whatsapp_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_contact_lead_id ON whatsapp_conversations(contact_lead_id);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_assigned_staff_id ON whatsapp_conversations(assigned_staff_id);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_last_message_at ON whatsapp_conversations(last_message_at);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_conversation_id ON whatsapp_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_twilio_sid ON whatsapp_messages(twilio_sid);
+
 CREATE TABLE IF NOT EXISTS user_activity (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID,

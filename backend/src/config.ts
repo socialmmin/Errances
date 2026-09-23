@@ -35,6 +35,11 @@ export const config = {
         publicUrl: process.env.R2_PUBLIC_URL || '',
     },
 
+    // The backend's own public origin, e.g. https://api-errances.socialmm.in — used to build
+    // absolute Twilio webhook/status-callback URLs. Without it, outbound messages are still
+    // sent, they just won't receive delivery/read status updates from Twilio.
+    publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''),
+
     twilio: {
         accountSid: process.env.TWILIO_ACCOUNT_SID || '',
         authToken: process.env.TWILIO_AUTH_TOKEN || '',

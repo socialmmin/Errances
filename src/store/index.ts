@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Lead, TourPackage, User, LeadStatusConfig, LeadActivity, LeadFollowup, LeadDocument, LeadPayment } from '@/types';
+import type { Lead, TourPackage, User, LeadStatusConfig, LeadActivity, LeadFollowup, LeadDocument, LeadPayment, WhatsAppConversation } from '@/types';
 import * as api from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { toast } from '@/components/ui/Toast';
@@ -12,6 +12,7 @@ interface AppState {
     staff: User[];
     leadStatuses: LeadStatusConfig[];
     followups: LeadFollowup[];
+    conversations: WhatsAppConversation[];
     isLoading: boolean;
 
     setUser: (user: User | null) => void;
@@ -41,6 +42,11 @@ interface AppState {
     addLeadPayment: (payment: Partial<LeadPayment>) => Promise<void>;
     deleteLeadPayment: (id: string) => Promise<void>;
 
+    fetchConversations: () => Promise<void>;
+    markConversationRead: (conversationId: string) => Promise<void>;
+    assignConversation: (conversationId: string, staffId: string | null, staffName?: string) => Promise<void>;
+    setConversationStatus: (conversationId: string, status: 'open' | 'pending' | 'resolved') => Promise<void>;
+
     fetchTours: () => Promise<void>;
     setTours: (tours: TourPackage[]) => void;
     addTour: (tour: TourPackage) => Promise<void>;
@@ -67,6 +73,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     staff: [],
     leadStatuses: DEFAULT_LEAD_STATUSES,
     followups: [],
+    conversations: [],
     isLoading: false,
 
     setUser: (user) => set({ user }),
@@ -353,34 +360,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
     },
     sendWhatsApp: async (leadId, to, message, contentSid, contentVariables) => {
-        console.log('Store: sendWhatsApp called', { leadId, to, message, contentSid, contentVariables });
         try {
-            const twilioMessage = message.startsWith('data:image/') ? '📷 Sent a photo' : message;
-            console.log('Store: Calling api.sendWhatsAppMessage...');
-            const apiResult = await api.sendWhatsAppMessage(to, twilioMessage, contentSid, contentVariables);
-            console.log('Store: api.sendWhatsAppMessage success', apiResult);
-            
-            let loggedContent = message;
-            if (contentSid) {
-                loggedContent = `[Template ${contentSid}] ${message}`;
-            }
+            const isImage = message.startsWith('data:image/');
+            const twilioMessage = isImage ? '📷 Sent a photo' : message;
+            const loggedContent = contentSid ? `[Template ${contentSid}] ${message}` : message;
 
-            console.log('Store: Saving message log to Supabase db...');
-            try {
-                const dbResult = await supabase.from('whatsapp_messages').insert([{
-                    lead_id: leadId,
-                    sender: 'user',
-                    content: loggedContent,
-                    status: 'sent'
-                }]);
-                console.log('Store: Supabase db insert result', dbResult);
-            } catch (dbError) {
-                console.error('Failed to save WhatsApp message to database:', dbError);
-            }
+            // Backend stores the message (with its Twilio SID) atomically with the send —
+            // no separate client-side insert needed.
+            await api.sendWhatsAppMessage(to, twilioMessage, leadId, contentSid, contentVariables, isImage ? loggedContent : undefined);
             toast.success('WhatsApp message sent successfully');
         } catch (error: any) {
             console.error('Failed to send WhatsApp message:', error);
-            toast.error(error.message || 'Failed to send WhatsApp message');
+            if (error?.code === 'SESSION_WINDOW_CLOSED') {
+                toast.error('This chat is outside the 24-hour WhatsApp window — send an approved template to reopen it.');
+            } else {
+                toast.error(error.message || 'Failed to send WhatsApp message');
+            }
             throw error;
         }
     },
@@ -581,6 +576,49 @@ export const useAppStore = create<AppState>((set, get) => ({
             toast.success('Payment removed');
         } catch (error: any) {
             toast.error(error?.message || 'Failed to remove payment');
+        }
+    },
+
+    // --- WhatsApp conversations ---
+    fetchConversations: async () => {
+        try {
+            const { data, error } = await supabase.from('whatsapp_conversations').select('*').order('last_message_at', { ascending: false });
+            if (error) throw error;
+            set({ conversations: data || [] });
+        } catch (error) {
+            console.error('Failed to fetch WhatsApp conversations:', error);
+        }
+    },
+    markConversationRead: async (conversationId) => {
+        set((state) => ({
+            conversations: state.conversations.map((c) => (c.id === conversationId ? { ...c, unread_count: 0 } : c)),
+        }));
+        try {
+            await api.markWhatsAppConversationRead(conversationId);
+        } catch (error) {
+            console.error('Failed to mark conversation read:', error);
+        }
+    },
+    assignConversation: async (conversationId, staffId, staffName) => {
+        try {
+            const { data } = await api.assignWhatsAppConversation(conversationId, staffId, staffName);
+            set((state) => ({
+                conversations: state.conversations.map((c) => (c.id === conversationId ? data : c)),
+            }));
+            toast.success(staffId ? 'Conversation assigned' : 'Conversation unassigned');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to assign conversation');
+        }
+    },
+    setConversationStatus: async (conversationId, status) => {
+        try {
+            const { data } = await api.updateWhatsAppConversationStatus(conversationId, status);
+            set((state) => ({
+                conversations: state.conversations.map((c) => (c.id === conversationId ? data : c)),
+            }));
+            toast.success(`Conversation marked ${status}`);
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to update conversation status');
         }
     },
 }));

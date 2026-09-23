@@ -16,6 +16,7 @@ type TableConfig = {
 
 const authed = (req: Request) => Boolean(req.user);
 const isAdmin = (req: Request) => req.user?.role === 'admin';
+const canManageWhatsapp = (req: Request) => req.user?.role === 'admin' || req.user?.role === 'sales_manager';
 
 const TABLES: Record<string, TableConfig> = {
     leads: {
@@ -49,16 +50,29 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: isAdmin,
     },
     whatsapp_messages: {
-        columns: ['id', 'lead_id', 'sender', 'content', 'status', 'created_at'],
+        columns: [
+            'id', 'lead_id', 'conversation_id', 'sender', 'content', 'status', 'direction', 'message_type',
+            'media_url', 'media_content_type', 'error_code', 'error_message', 'sent_by', 'twilio_sid', 'created_at',
+        ],
         canRead: authed,
         canWrite: authed,
         canDelete: authed,
     },
     whatsapp_conversations: {
-        columns: ['id', 'phone', 'stage', 'selected_package', 'created_at', 'updated_at'],
+        columns: [
+            'id', 'phone', 'stage', 'selected_package', 'contact_lead_id', 'assigned_staff_id', 'status',
+            'unread_count', 'last_message_at', 'last_message_preview', 'last_inbound_at', 'channel',
+            'created_at', 'updated_at',
+        ],
         canRead: authed,
         canWrite: authed,
         canDelete: authed,
+    },
+    whatsapp_templates: {
+        columns: ['id', 'name', 'twilio_content_sid', 'category', 'language', 'body_preview', 'variables', 'is_active', 'created_by', 'created_by_name', 'created_at'],
+        canRead: authed,
+        canWrite: canManageWhatsapp,
+        canDelete: canManageWhatsapp,
     },
     user_activity: {
         columns: ['id', 'user_id', 'event_type', 'page_path', 'metadata', 'created_at'],

@@ -113,6 +113,74 @@ export type LeadPayment = {
     created_at: string;
 };
 
+export type WhatsAppConversation = {
+    id: string;
+    phone: string;
+    stage: string;
+    selected_package: string | null;
+    contact_lead_id: string | null;
+    assigned_staff_id: string | null;
+    status: 'open' | 'pending' | 'resolved';
+    unread_count: number;
+    last_message_at: string | null;
+    last_message_preview: string | null;
+    last_inbound_at: string | null;
+    channel: string;
+    created_at: string;
+    updated_at: string;
+};
+
+export type WhatsAppMessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'undelivered';
+
+export type WhatsAppMessageRecord = {
+    id: string;
+    lead_id: string;
+    conversation_id: string | null;
+    sender: 'user' | 'contact';
+    content: string;
+    status: WhatsAppMessageStatus;
+    direction: 'inbound' | 'outbound';
+    message_type: 'text' | 'image' | 'document' | 'audio' | 'video' | 'template' | 'location';
+    media_url: string | null;
+    media_content_type: string | null;
+    error_code: string | null;
+    error_message: string | null;
+    sent_by: string | null;
+    twilio_sid: string | null;
+    created_at: string;
+};
+
+export type WhatsAppTemplate = {
+    id: string;
+    name: string;
+    twilio_content_sid: string;
+    category: string;
+    language: string;
+    body_preview: string | null;
+    variables: string[];
+    is_active: boolean;
+    created_by?: string | null;
+    created_by_name?: string | null;
+    created_at: string;
+};
+
+export type WhatsAppSettings = {
+    connected: boolean;
+    whatsappNumber: string | null;
+    webhookConfigured: boolean;
+    incomingWebhookUrl: string | null;
+    statusWebhookUrl: string | null;
+    activeTemplateCount: number;
+    canManage: boolean;
+    settings: {
+        id: number;
+        business_name: string | null;
+        default_template_id: string | null;
+        session_window_hours: number;
+        updated_at: string;
+    } | null;
+};
+
 export type TourPackage = {
     id: string;
     title: string;

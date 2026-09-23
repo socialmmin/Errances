@@ -4,12 +4,13 @@ import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
 import { useAppStore } from '@/store';
 import { triggerBirthdayWishesCheck } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 
 const COLLAPSE_KEY = 'sidebar_collapsed';
 
 export function Layout() {
-    const { fetchLeads, fetchTours, fetchLeadStatuses, fetchFollowups } = useAppStore();
+    const { fetchLeads, fetchTours, fetchLeadStatuses, fetchFollowups, fetchConversations } = useAppStore();
     const [collapsed, setCollapsed] = useState(() => {
         try { return localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { return false; }
     });
@@ -19,10 +20,35 @@ export function Layout() {
         fetchTours();
         fetchLeadStatuses();
         fetchFollowups();
-    }, [fetchLeads, fetchTours, fetchLeadStatuses, fetchFollowups]);
+        fetchConversations();
+    }, [fetchLeads, fetchTours, fetchLeadStatuses, fetchFollowups, fetchConversations]);
 
     useEffect(() => {
         triggerBirthdayWishesCheck().catch(err => console.error('Failed to trigger birthday wishes check:', err));
+    }, []);
+
+    // App-wide realtime: keep the WhatsApp conversation list (unread counts, assignment,
+    // status) live everywhere — the inbox itself, the notification bell, the sidebar — not
+    // just while the WhatsApp page happens to be mounted.
+    useEffect(() => {
+        const channel = supabase
+            .channel('global:whatsapp_conversations')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_conversations' }, (payload: any) => {
+                useAppStore.setState((state) => {
+                    if (payload.eventType === 'DELETE') {
+                        return { conversations: state.conversations.filter((c) => c.id !== payload.old.id) };
+                    }
+                    const exists = state.conversations.some((c) => c.id === payload.new.id);
+                    return {
+                        conversations: exists
+                            ? state.conversations.map((c) => (c.id === payload.new.id ? payload.new : c))
+                            : [payload.new, ...state.conversations],
+                    };
+                });
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
     }, []);
 
     const toggleCollapse = () => {

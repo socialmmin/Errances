@@ -16,15 +16,19 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { useAppStore } from '@/store';
 import { supabase, anonClient, API_BASE, getAuthToken } from '@/lib/supabase';
+import { getWhatsAppWindowStatus, WhatsAppSessionWindowError } from '@/lib/api';
 
-import type { Lead } from '@/types';
+import type { Lead, WhatsAppTemplate } from '@/types';
+
+type MessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'undelivered';
 
 type Message = {
     id: string;
     content: string;
     sender: 'user' | 'contact';
     timestamp: Date;
-    status: 'sent' | 'delivered' | 'read';
+    status: MessageStatus;
+    errorMessage?: string | null;
 };
 
 type Contact = {
@@ -51,6 +55,8 @@ export function WhatsApp() {
     const fetchStaff = useAppStore(state => state.fetchStaff);
     const updateLead = useAppStore(state => state.updateLead);
     const deleteLead = useAppStore(state => state.deleteLead);
+    const conversations = useAppStore(state => state.conversations);
+    const markConversationReadInStore = useAppStore(state => state.markConversationRead);
     const location = useLocation();
     const navigate = useNavigate();
 
@@ -98,6 +104,14 @@ export function WhatsApp() {
 
     const [isDeleteContactOpen, setIsDeleteContactOpen] = useState(false);
     const [isDeletingContact, setIsDeletingContact] = useState(false);
+
+    // 24-hour WhatsApp session window + template picker (required to re-open a closed chat)
+    const [windowStatus, setWindowStatus] = useState<{ withinWindow: boolean; lastInboundAt: string | null } | null>(null);
+    const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
+    const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false);
+    const [templatePickerSid, setTemplatePickerSid] = useState('');
+    const [templatePickerVars, setTemplatePickerVars] = useState('');
+    const [isSendingTemplate, setIsSendingTemplate] = useState(false);
 
     // Set edit inputs when selected group chat changes
     useEffect(() => {
@@ -752,12 +766,79 @@ export function WhatsApp() {
         return list.sort((a, b) => b.lastMessageTime.getTime() - a.lastMessageTime.getTime());
     }, [leadsByPhone, leads, lastMessages]);
 
+    // Unread WhatsApp counts per contact, matched by phone (last 10 digits, to survive
+    // +91/country-code and formatting differences between the leads table and Twilio).
+    const digitsOnly = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+    const unreadByPhone = useMemo(() => {
+        const map: Record<string, { count: number; conversationId: string }> = {};
+        for (const c of conversations) {
+            if (c.unread_count <= 0) continue;
+            const key = digitsOnly(c.phone);
+            if (!key) continue;
+            map[key] = { count: (map[key]?.count || 0) + c.unread_count, conversationId: c.id };
+        }
+        return map;
+    }, [conversations]);
+
     // Set initial selected contact
     useEffect(() => {
         if (isLastMessagesLoaded && contacts.length > 0 && !selectedContact) {
             setSelectedContact(contacts[0]);
         }
     }, [contacts, selectedContact, isLastMessagesLoaded]);
+
+    // Mark the matching conversation read when it's opened in the inbox.
+    useEffect(() => {
+        if (!selectedContact) return;
+        const entry = unreadByPhone[digitsOnly(selectedContact.phone)];
+        if (entry) markConversationReadInStore(entry.conversationId).catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedContact?.phone]);
+
+    // Load active approved templates once — used by the template picker below.
+    useEffect(() => {
+        supabase.from('whatsapp_templates').select('*').eq('is_active', true).order('created_at', { ascending: false })
+            .then(({ data, error }: any) => { if (!error && data) setTemplates(data); })
+            .catch(() => {});
+    }, []);
+
+    // Track whether the active chat is inside WhatsApp's 24h free-form session window.
+    useEffect(() => {
+        if (!selectedContact?.phone) { setWindowStatus(null); return; }
+        let cancelled = false;
+        getWhatsAppWindowStatus(selectedContact.phone).then((status) => {
+            if (!cancelled) setWindowStatus(status);
+        }).catch(() => { if (!cancelled) setWindowStatus(null); });
+        return () => { cancelled = true; };
+    }, [selectedContact?.phone, messages.length]);
+
+    const handleSendTemplate = async () => {
+        if (!selectedContact || !templatePickerSid) return;
+        setIsSendingTemplate(true);
+        try {
+            const template = templates.find(t => t.twilio_content_sid === templatePickerSid);
+            const variables: Record<string, string> = {};
+            if (templatePickerVars.trim()) {
+                templatePickerVars.split(',').forEach((val, idx) => { variables[String(idx + 1)] = val.trim(); });
+            }
+            await sendWhatsApp(
+                selectedContact.id,
+                selectedContact.phone,
+                template?.body_preview || `[Template ${templatePickerSid}]`,
+                templatePickerSid,
+                Object.keys(variables).length ? variables : undefined
+            );
+            toast.success('Template sent — the 24-hour window is now open.');
+            setIsTemplatePickerOpen(false);
+            setTemplatePickerSid('');
+            setTemplatePickerVars('');
+            getWhatsAppWindowStatus(selectedContact.phone).then(setWindowStatus).catch(() => {});
+        } catch (err: any) {
+            toast.error(err?.message || 'Failed to send template');
+        } finally {
+            setIsSendingTemplate(false);
+        }
+    };
 
     // Subscribe to leads database changes in real-time
     useEffect(() => {
@@ -828,7 +909,8 @@ export function WhatsApp() {
                         content: m.content,
                         sender: m.sender as 'user' | 'contact',
                         timestamp: new Date(m.created_at),
-                        status: m.status as 'sent' | 'delivered' | 'read'
+                        status: m.status as MessageStatus,
+                        errorMessage: m.error_message ?? null,
                     })));
                 } else if (error) {
                     console.warn('Error querying whatsapp messages:', error.message);
@@ -871,7 +953,8 @@ export function WhatsApp() {
                                             content: newMessage.content,
                                             sender: newMessage.sender as 'user' | 'contact',
                                             timestamp: new Date(newMessage.created_at),
-                                            status: newMessage.status as 'sent' | 'delivered' | 'read'
+                                            status: newMessage.status as MessageStatus,
+                                            errorMessage: newMessage.error_message ?? null,
                                         }];
                                     });
                                 }
@@ -885,7 +968,8 @@ export function WhatsApp() {
                                     setMessages(prev => prev.map(m => m.id === updatedMessage.id ? {
                                         ...m,
                                         content: updatedMessage.content,
-                                        status: updatedMessage.status as 'sent' | 'delivered' | 'read'
+                                        status: updatedMessage.status as MessageStatus,
+                                        errorMessage: updatedMessage.error_message ?? null,
                                     } : m));
                                 }
                                 fetchLastMessages(); // Refresh sidebar preview
@@ -964,6 +1048,10 @@ export function WhatsApp() {
             }
         } catch (error) {
             console.error("Failed to handle WhatsApp message operation:", error);
+            if (error instanceof WhatsAppSessionWindowError) {
+                setMessageInput(currentMsg);
+                setIsTemplatePickerOpen(true);
+            }
         }
     };
 
@@ -1151,6 +1239,11 @@ export function WhatsApp() {
                                             <p className="text-xs text-slate-500 truncate flex-1 mr-2 font-medium">
                                                 {contact.lastMessage}
                                             </p>
+                                            {unreadByPhone[digitsOnly(contact.phone)] && (
+                                                <span className="flex-shrink-0 h-4.5 min-w-[18px] px-1 rounded-full bg-emerald-500 text-white text-[9px] font-black flex items-center justify-center">
+                                                    {unreadByPhone[digitsOnly(contact.phone)].count}
+                                                </span>
+                                            )}
                                             {!isBroadcastMode && (
                                                 <div className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity absolute right-0 bg-gradient-to-l from-slate-50 hover:from-slate-100 pl-4 h-full flex items-center">
                                                     <DropdownMenu>
@@ -1642,15 +1735,27 @@ export function WhatsApp() {
                                                     <div className={cn("text-[9px] text-slate-400 mt-1 flex items-center gap-1 font-semibold", isUser ? "justify-end" : "justify-start")}>
                                                         {format(message.timestamp, 'h:mm a')}
                                                         {isUser && (
-                                                            <span className={cn(
-                                                                message.status === 'read' ? "text-[#53bdeb]" : "text-slate-400"
-                                                            )}>
-                                                                {message.status === 'sent' ? (
+                                                            <span
+                                                                className={cn(
+                                                                    message.status === 'read' ? "text-[#53bdeb]" :
+                                                                    (message.status === 'failed' || message.status === 'undelivered') ? "text-rose-500" :
+                                                                    "text-slate-400"
+                                                                )}
+                                                                title={message.status === 'failed' || message.status === 'undelivered' ? (message.errorMessage || 'Message failed to deliver') : undefined}
+                                                            >
+                                                                {message.status === 'failed' || message.status === 'undelivered' ? (
+                                                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                                                ) : message.status === 'queued' || message.status === 'sending' ? (
+                                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                                ) : message.status === 'sent' ? (
                                                                     <Check className="h-3.5 w-3.5" />
                                                                 ) : (
                                                                     <CheckCheck className="h-3.5 w-3.5" />
                                                                 )}
                                                             </span>
+                                                        )}
+                                                        {isUser && (message.status === 'failed' || message.status === 'undelivered') && (
+                                                            <span className="text-rose-500">Failed</span>
                                                         )}
                                                     </div>
                                                 </div>
@@ -1664,6 +1769,22 @@ export function WhatsApp() {
 
                         {/* Input Area */}
                         <div className="p-4 bg-white border-t border-slate-200 z-10 relative">
+                            {/* 24h Session Window Banner — WhatsApp requires an approved template outside this window */}
+                            {windowStatus && !windowStatus.withinWindow && (
+                                <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-xl mb-2.5">
+                                    <div className="flex items-center gap-1.5">
+                                        <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                                        <span>
+                                            {windowStatus.lastInboundAt
+                                                ? 'The 24-hour WhatsApp window has closed. Send an approved template to message this contact again.'
+                                                : 'No inbound message yet — an approved template is required to start this conversation.'}
+                                        </span>
+                                    </div>
+                                    <Button type="button" size="sm" className="h-7 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px]" onClick={() => setIsTemplatePickerOpen(true)}>
+                                        Send Template
+                                    </Button>
+                                </div>
+                            )}
                             {/* Editing Message Banner */}
                             {editingMessageId && (
                                 <div className="flex items-center justify-between px-4 py-1.5 bg-indigo-50 border border-indigo-100/50 text-indigo-800 text-xs font-semibold rounded-xl mb-2.5 animate-in slide-in-from-bottom duration-200">
@@ -2102,6 +2223,56 @@ export function WhatsApp() {
                             ) : (
                                 'Delete'
                             )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Template Picker — required to (re)open a chat outside the 24h session window */}
+            <Dialog open={isTemplatePickerOpen} onOpenChange={setIsTemplatePickerOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Send Approved Template</DialogTitle>
+                        <DialogDescription>
+                            WhatsApp requires an approved template to message a contact outside the 24-hour session window.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-2">
+                        {templates.length === 0 ? (
+                            <p className="text-xs text-slate-400">No active templates configured. Ask an admin to add one in WhatsApp Settings.</p>
+                        ) : (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                {templates.map((t) => (
+                                    <button
+                                        key={t.id}
+                                        type="button"
+                                        onClick={() => setTemplatePickerSid(t.twilio_content_sid)}
+                                        className={cn(
+                                            "w-full text-left px-3 py-2 rounded-xl border text-xs font-semibold transition-colors",
+                                            templatePickerSid === t.twilio_content_sid ? "border-indigo-400 bg-indigo-50 text-indigo-800" : "border-slate-200 hover:bg-slate-50 text-slate-700"
+                                        )}
+                                    >
+                                        <div>{t.name}</div>
+                                        {t.body_preview && <div className="text-[10px] text-slate-400 font-medium truncate">{t.body_preview}</div>}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div>
+                            <Label htmlFor="template-picker-vars" className="text-[10px] font-black uppercase tracking-widest text-slate-400">Template Variables (comma separated)</Label>
+                            <Input
+                                id="template-picker-vars"
+                                value={templatePickerVars}
+                                onChange={(e) => setTemplatePickerVars(e.target.value)}
+                                placeholder="e.g. John, Bali Package"
+                                className="mt-1"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setIsTemplatePickerOpen(false)}>Cancel</Button>
+                        <Button type="button" disabled={!templatePickerSid || isSendingTemplate} onClick={handleSendTemplate}>
+                            {isSendingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send Template'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

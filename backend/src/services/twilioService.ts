@@ -8,12 +8,19 @@ function getClient(): twilio.Twilio {
     return client;
 }
 
+export type SendWhatsAppOptions = {
+    contentSid?: string;
+    contentVariables?: Record<string, string>;
+    mediaUrl?: string[];
+};
+
+export type SendWhatsAppResult = { sid: string; status: string };
+
 export async function sendTwilioWhatsAppMessage(
     to: string,
     body: string,
-    contentSid?: string,
-    contentVariables?: Record<string, string>
-): Promise<string> {
+    options: SendWhatsAppOptions = {}
+): Promise<SendWhatsAppResult> {
     if (!isTwilioConfigured()) {
         throw new Error('Twilio is not configured on the server');
     }
@@ -24,15 +31,17 @@ export async function sendTwilioWhatsAppMessage(
         : `whatsapp:${config.twilio.whatsappNumber}`;
 
     const payload: Record<string, any> = { to: formattedTo, from: formattedFrom };
-    if (contentSid) {
-        payload.contentSid = contentSid;
-        if (contentVariables) payload.contentVariables = JSON.stringify(contentVariables);
+    if (options.contentSid) {
+        payload.contentSid = options.contentSid;
+        if (options.contentVariables) payload.contentVariables = JSON.stringify(options.contentVariables);
     } else {
         payload.body = body;
     }
+    if (options.mediaUrl?.length) payload.mediaUrl = options.mediaUrl;
+    if (config.publicUrl) payload.statusCallback = `${config.publicUrl}/api/webhooks/twilio/status`;
 
     const response = await getClient().messages.create(payload as any);
-    return response.sid;
+    return { sid: response.sid, status: response.status };
 }
 
 export async function listWhatsAppMessages(pageSize = 1000) {
@@ -55,3 +64,6 @@ export function validateTwilioSignature(signature: string | undefined, url: stri
     if (!signature) return false;
     return twilio.validateRequest(config.twilio.authToken, signature, url, params);
 }
+
+/** Maps Twilio's MessageStatus values onto our whatsapp_messages.status CHECK constraint (they already line up 1:1). */
+export const TWILIO_STATUS_VALUES = ['queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'undelivered'] as const;

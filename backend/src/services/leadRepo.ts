@@ -84,13 +84,3 @@ export async function getActiveTours(): Promise<Array<{ id: string; name: string
     );
     return rows;
 }
-
-export async function insertWhatsappMessage(leadId: string, sender: 'user' | 'contact', content: string, status = 'sent', createdAt?: string) {
-    const { rows } = await pool.query(
-        `INSERT INTO whatsapp_messages (lead_id, sender, content, status, created_at)
-         VALUES ($1, $2, $3, $4, COALESCE($5, NOW())) RETURNING *`,
-        [leadId, sender, content, status, createdAt ?? null]
-    );
-    broadcastChange('whatsapp_messages', 'INSERT', { new: rows[0] });
-    return rows[0];
-}

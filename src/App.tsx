@@ -19,6 +19,7 @@ import { Pipeline } from '@/pages/pipeline/Pipeline';
 import { Analytics } from '@/pages/analytics/Analytics';
 import { Staff } from '@/pages/staff/Staff';
 import { StaffDetails } from '@/pages/staff/StaffDetails';
+import { WhatsAppSettings } from '@/pages/admin/WhatsAppSettings';
 
 // ... inside Routes
 // This comment seems to be a remnant from the original context, removing it as it's not relevant to the final code structure.
@@ -64,6 +65,9 @@ function AppRoutes() {
         } />
         <Route path="staff/:id" element={
           user?.role === 'admin' ? <StaffDetails /> : <Navigate to="/" replace />
+        } />
+        <Route path="settings/whatsapp" element={
+          (user?.role === 'admin' || user?.role === 'sales_manager') ? <WhatsAppSettings /> : <Navigate to="/" replace />
         } />
       </Route>
     </Routes>

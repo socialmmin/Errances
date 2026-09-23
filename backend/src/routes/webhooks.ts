@@ -1,9 +1,17 @@
 import { Router } from 'express';
+import { pool } from '../db.js';
 import * as leadRepo from '../services/leadRepo.js';
 import * as convRepo from '../services/conversationRepo.js';
 import { sendTwilioWhatsAppMessage, validateTwilioSignature } from '../services/twilioService.js';
+import { recordInboundMessage, recordOutboundMessage, applyStatusCallback } from '../services/whatsappMessageService.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
+
+// Twilio can legitimately retry a webhook many times in quick succession when it doesn't
+// get a fast 200 back; this is generous enough for that while still bounding abuse from a
+// spoofed/forged source (signature validation below is the real gate).
+const webhookLimiter = rateLimit({ windowMs: 60_000, max: 120, keyFn: (req) => `webhook:${req.ip}` });
 
 const GREETINGS = ['hi', 'hii', 'hiii', 'hello', 'hey', 'heyy', 'hola', 'start', 'menu', 'restart', 'good morning', 'good afternoon', 'good evening', 'yo', 'hi there', 'hello there', 'greeting', 'greetings'];
 
@@ -25,40 +33,76 @@ function parseNameAndPackage(rawBody: string, activePackages: Array<{ name: stri
     return { parsedName, selectedIndex };
 }
 
-router.post('/twilio', async (req, res) => {
-    const signature = req.header('x-twilio-signature');
+function fullUrlFor(req: import('express').Request): string {
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol;
     const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
-    const fullUrl = `${protocol}://${host}${req.originalUrl}`;
+    return `${protocol}://${host}${req.originalUrl}`;
+}
 
-    if (!validateTwilioSignature(signature, fullUrl, req.body)) {
+router.post('/twilio', webhookLimiter, async (req, res) => {
+    const signature = req.header('x-twilio-signature');
+    if (!validateTwilioSignature(signature, fullUrlFor(req), req.body)) {
         return res.status(403).send('Forbidden: Twilio signature validation failed');
     }
 
-    const { From, Body } = req.body;
-    if (!From || !Body) return res.status(400).send('Missing From or Body');
+    const { From, Body, MessageSid, NumMedia, MediaUrl0, MediaContentType0 } = req.body;
+    if (!From || (!Body && !MessageSid)) return res.status(400).send('Missing From or Body');
 
     const cleanPhone = From.toString().replace('whatsapp:', '').trim();
-    const rawBody = Body.toString().trim();
+    const rawBody = (Body || '').toString().trim();
+
+    // Idempotency: Twilio retries webhook deliveries on slow/ambiguous responses. If we've
+    // already stored this exact inbound message, acknowledge without reprocessing the bot
+    // flow again (which would otherwise send a duplicate reply).
+    if (MessageSid) {
+        const { rows: dupe } = await pool.query('SELECT id FROM whatsapp_messages WHERE twilio_sid = $1', [MessageSid]);
+        if (dupe.length > 0) {
+            return res.status(200).send('<Response></Response>');
+        }
+    }
+
+    const hasMedia = Number(NumMedia) > 0 && MediaUrl0;
     let currentLeadId: string | null = null;
 
-    // Sends a reply via Twilio and logs both sides of the exchange into whatsapp_messages
-    // (so it shows up in the CRM chat UI, mirroring the previous Supabase Edge Function).
+    // Log the inbound message (conversation bookkeeping, unread count, contact matching,
+    // realtime broadcast, activity timeline) before running the automated reply flow below.
+    try {
+        const { lead } = await recordInboundMessage({
+            phone: cleanPhone,
+            body: rawBody || (hasMedia ? '📷 Media message' : ''),
+            twilioSid: MessageSid || `no-sid-${Date.now()}`,
+            messageType: hasMedia ? (MediaContentType0?.startsWith('image') ? 'image' : MediaContentType0?.startsWith('video') ? 'video' : MediaContentType0?.startsWith('audio') ? 'audio' : 'document') : 'text',
+            mediaUrl: hasMedia ? MediaUrl0 : undefined,
+            mediaContentType: hasMedia ? MediaContentType0 : undefined,
+        });
+        currentLeadId = lead.id;
+    } catch (err) {
+        console.error('[webhook:twilio] failed to record inbound message:', err);
+    }
+
+    // Sends a reply via Twilio and logs it as an outbound (bot-authored) message.
     const respond = async (text: string) => {
-        await sendTwilioWhatsAppMessage(cleanPhone, text);
-        if (currentLeadId) await leadRepo.insertWhatsappMessage(currentLeadId, 'user', text, 'read');
+        const result = await sendTwilioWhatsAppMessage(cleanPhone, text);
+        await recordOutboundMessage({
+            phone: cleanPhone,
+            leadId: currentLeadId,
+            body: text,
+            twilioSid: result.sid,
+            twilioStatus: result.status,
+        }).catch((err) => console.error('[webhook:twilio] failed to record bot reply:', err));
     };
-    const logIncoming = async (leadId: string) => {
-        currentLeadId = leadId;
-        await leadRepo.insertWhatsappMessage(leadId, 'contact', rawBody, 'read');
-    };
+
+    if (!rawBody) {
+        // Media-only message with no text — logged above; nothing for the scripted bot to parse.
+        return res.status(200).send('<Response></Response>');
+    }
 
     try {
         let conversation = await convRepo.getConversationByPhone(cleanPhone);
         const activePackages = await leadRepo.getActiveTours();
 
         if (activePackages.length === 0) {
-            await sendTwilioWhatsAppMessage(cleanPhone, 'Thank you for contacting us. We currently do not have any active packages available. A travel consultant will contact you shortly.');
+            await respond('Thank you for contacting us. We currently do not have any active packages available. A travel consultant will contact you shortly.');
             return res.status(200).send('<Response></Response>');
         }
 
@@ -67,11 +111,7 @@ router.post('/twilio', async (req, res) => {
         if (!conversation || isResetRequest) {
             conversation = isResetRequest && conversation
                 ? await convRepo.updateConversation(cleanPhone, 'collect_name', null)
-                : await convRepo.createConversation(cleanPhone);
-
-            let lead = await leadRepo.getLeadByPhone(cleanPhone);
-            if (!lead) lead = await leadRepo.createLead(cleanPhone);
-            await logIncoming(lead.id);
+                : (conversation || await convRepo.createConversation(cleanPhone));
 
             const listStr = activePackages.map((p, idx) => `${idx + 1}. ${p.name}`).join('\n');
             const welcomeText = `Thank you for contacting Errances Voyages. 🌟\n\nCould you please reply with your *Full Name* and select the *Tour Package Number* you are interested in from the list below:\n\n*Active Tour Packages:*\n${listStr}\n\nExample reply: John Doe - 2`;
@@ -82,7 +122,7 @@ router.post('/twilio', async (req, res) => {
         if (conversation.stage === 'collect_name') {
             let lead = await leadRepo.getLeadByPhone(cleanPhone);
             if (!lead) lead = await leadRepo.createLead(cleanPhone);
-            await logIncoming(lead.id);
+            currentLeadId = lead.id;
 
             if (conversation.selected_package) {
                 const userName = rawBody;
@@ -122,7 +162,7 @@ router.post('/twilio', async (req, res) => {
         if (conversation.stage === 'package_selection') {
             let lead = await leadRepo.getLeadByPhone(cleanPhone);
             if (!lead) lead = await leadRepo.createLead(cleanPhone);
-            await logIncoming(lead.id);
+            currentLeadId = lead.id;
 
             const selectedIndex = parseInt(rawBody, 10) - 1;
             if (Number.isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= activePackages.length) {
@@ -138,19 +178,38 @@ router.post('/twilio', async (req, res) => {
             return res.status(200).send('<Response></Response>');
         }
 
-        // Stage 'completed': human agent mode — still log the incoming message so it shows in chat.
-        const lead = await leadRepo.getLeadByPhone(cleanPhone);
-        if (lead) await logIncoming(lead.id);
+        // Stage 'completed': human agent mode — the inbound message was already logged above.
         return res.status(200).send('<Response></Response>');
     } catch (error: any) {
         console.error('[webhook:twilio] error:', error);
         try {
-            await sendTwilioWhatsAppMessage(cleanPhone, "Sorry, we encountered an error while processing your request. Please try again later or reply with 'menu' to restart.");
+            await respond("Sorry, we encountered an error while processing your request. Please try again later or reply with 'menu' to restart.");
         } catch {
             // best effort
         }
         return res.status(500).send('Internal Server Error');
     }
+});
+
+// Twilio's delivery/read status callback — registered per-message via `statusCallback` on
+// send (see twilioService.sendTwilioWhatsAppMessage). Updates queued -> sent -> delivered ->
+// read (or failed/undelivered with an error code) on the matching stored message.
+router.post('/twilio/status', webhookLimiter, async (req, res) => {
+    const signature = req.header('x-twilio-signature');
+    if (!validateTwilioSignature(signature, fullUrlFor(req), req.body)) {
+        return res.status(403).send('Forbidden: Twilio signature validation failed');
+    }
+
+    const { MessageSid, MessageStatus, ErrorCode, ErrorMessage } = req.body;
+    if (!MessageSid || !MessageStatus) return res.status(400).send('Missing MessageSid or MessageStatus');
+
+    try {
+        await applyStatusCallback(MessageSid, MessageStatus, ErrorCode, ErrorMessage);
+    } catch (err) {
+        console.error('[webhook:twilio/status] failed to apply status update:', err);
+    }
+
+    return res.status(200).send('<Response></Response>');
 });
 
 export default router;

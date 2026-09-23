@@ -331,11 +331,23 @@ export async function deleteStaff(id: string) {
 
 // --- WHATSAPP ---
 
+export class WhatsAppSessionWindowError extends Error {
+    code = 'SESSION_WINDOW_CLOSED' as const;
+}
+
+/**
+ * Sends via the backend's Twilio integration. The backend stores the message (with its
+ * Twilio SID) itself, atomically with the send — callers should NOT separately insert a
+ * whatsapp_messages row for the same send.
+ */
 export async function sendWhatsAppMessage(
     to: string,
     message: string,
+    leadId?: string,
     contentSid?: string,
-    contentVariables?: Record<string, string>
+    contentVariables?: Record<string, string>,
+    /** What gets stored in whatsapp_messages, if different from what's sent to Twilio (image attachments). */
+    storedContent?: string
 ) {
     const token = getAuthToken();
 
@@ -345,20 +357,82 @@ export async function sendWhatsAppMessage(
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ to, message, contentSid, contentVariables }),
+        body: JSON.stringify({ to, message, content: storedContent, leadId, contentSid, contentVariables }),
     });
 
     if (!response.ok) {
         const errText = await response.text();
         let errMsg = 'Failed to send WhatsApp message';
+        let code: string | undefined;
         try {
             const errObj = JSON.parse(errText);
             errMsg = errObj.error || errObj.message || errMsg;
+            code = errObj.code;
         } catch (_) {}
+        if (code === 'SESSION_WINDOW_CLOSED') throw new WhatsAppSessionWindowError(errMsg);
         throw new Error(errMsg);
     }
 
     return await response.json();
+}
+
+export async function getWhatsAppWindowStatus(phone: string): Promise<{ withinWindow: boolean; lastInboundAt: string | null }> {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE}/api/whatsapp/window-status?phone=${encodeURIComponent(phone)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) return { withinWindow: false, lastInboundAt: null };
+    return response.json();
+}
+
+export async function markWhatsAppConversationRead(conversationId: string) {
+    const token = getAuthToken();
+    await fetch(`${API_BASE}/api/whatsapp/conversations/${conversationId}/read`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+}
+
+export async function assignWhatsAppConversation(conversationId: string, staffId: string | null, staffName?: string) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE}/api/whatsapp/conversations/${conversationId}/assign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ staffId, staffName }),
+    });
+    if (!response.ok) throw new Error('Failed to assign conversation');
+    return response.json();
+}
+
+export async function updateWhatsAppConversationStatus(conversationId: string, status: 'open' | 'pending' | 'resolved') {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE}/api/whatsapp/conversations/${conversationId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ status }),
+    });
+    if (!response.ok) throw new Error('Failed to update conversation status');
+    return response.json();
+}
+
+export async function getWhatsAppSettings() {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE}/api/whatsapp/settings`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) throw new Error('Failed to load WhatsApp settings');
+    return response.json();
+}
+
+export async function updateWhatsAppSettings(payload: { businessName?: string; defaultTemplateId?: string | null; sessionWindowHours?: number }) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE}/api/whatsapp/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error('Failed to update WhatsApp settings');
+    return response.json();
 }
 
 export async function deleteWhatsAppMessage(id: string) {

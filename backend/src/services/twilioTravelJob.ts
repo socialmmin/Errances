@@ -1,6 +1,6 @@
 import { pool } from '../db.js';
 import { sendTwilioWhatsAppMessage } from './twilioService.js';
-import { insertWhatsappMessage } from './leadRepo.js';
+import { recordOutboundMessage } from './whatsappMessageService.js';
 
 /** Twilio-side birthday/departure/arrival check — mirrors the old Supabase Edge Function,
  *  triggered on-demand by the frontend after a lead is created/updated. The Baileys bridge
@@ -51,9 +51,9 @@ export async function checkAndSendTravelMessagesTwilio() {
 
         const sendAndLog = async (content: string, type: string) => {
             try {
-                const sid = await sendTwilioWhatsAppMessage(lead.phone, content);
-                await insertWhatsappMessage(lead.id, 'user', content, 'sent');
-                results.push({ lead: lead.name, type, status: 'success', sid });
+                const result = await sendTwilioWhatsAppMessage(lead.phone, content);
+                await recordOutboundMessage({ phone: lead.phone, leadId: lead.id, body: content, twilioSid: result.sid, twilioStatus: result.status });
+                results.push({ lead: lead.name, type, status: 'success', sid: result.sid });
             } catch (err: any) {
                 results.push({ lead: lead.name, type, status: 'error', error: err.message });
             }

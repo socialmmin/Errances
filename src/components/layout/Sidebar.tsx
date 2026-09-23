@@ -13,6 +13,7 @@ import {
     ChevronsLeft,
     ChevronsRight,
     Compass,
+    Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -43,7 +44,13 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: { collapsed?: b
         { label: 'Catalog', items: [{ label: t('tourPackages'), icon: Map, href: '/tours' }] },
         { label: 'Engage', items: [{ label: t('whatsapp'), icon: MessageSquare, href: '/whatsapp' }] },
         { label: 'Insights', items: [{ label: t('analytics'), icon: BarChart3, href: '/analytics' }] },
-        ...(user?.role === 'admin' ? [{ label: 'Admin', items: [{ label: t('staff'), icon: Users, href: '/staff' }] }] : []),
+        ...(user?.role === 'admin' || user?.role === 'sales_manager' ? [{
+            label: 'Admin',
+            items: [
+                ...(user?.role === 'admin' ? [{ label: t('staff'), icon: Users, href: '/staff' }] : []),
+                { label: 'WhatsApp Settings', icon: Settings, href: '/settings/whatsapp' },
+            ],
+        }] : []),
     ];
 
     const isActive = (item: NavItem) => (item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(item.href + '/'));

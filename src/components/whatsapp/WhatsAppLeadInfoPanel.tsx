@@ -14,11 +14,16 @@ import {
 import { cn } from '@/lib/utils';
 
 export function WhatsAppLeadInfoPanel({ leadId }: { leadId: string | null }) {
-    const { leads, staff, leadStatuses, followups, updateLead } = useAppStore();
+    const { leads, staff, leadStatuses, followups, updateLead, conversations, assignConversation, setConversationStatus } = useAppStore();
     const navigate = useNavigate();
     const [followUpOpen, setFollowUpOpen] = useState(false);
 
     const lead = leadId ? leads.find((l) => l.id === leadId) : null;
+    const digitsOnly = (p?: string | null) => (p || '').replace(/\D/g, '').slice(-10);
+    const conversation = lead
+        ? conversations.find((c) => c.contact_lead_id === lead.id) || conversations.find((c) => digitsOnly(c.phone) === digitsOnly(lead.phone))
+        : null;
+    const conversationAssignee = conversation ? staff.find((s) => s.id === conversation.assigned_staff_id) : null;
 
     if (!lead) {
         return (
@@ -60,6 +65,42 @@ export function WhatsAppLeadInfoPanel({ leadId }: { leadId: string | null }) {
                     value={pendingFollowUp ? new Date(pendingFollowUp.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : undefined}
                 />
             </div>
+
+            {conversation && (
+                <div className="p-5 space-y-3 border-b border-slate-100">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">WhatsApp Conversation</p>
+                    <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1.5">Conversation Status</p>
+                        <Select value={conversation.status} onValueChange={(v) => setConversationStatus(conversation.id, v as 'open' | 'pending' | 'resolved')}>
+                            <SelectTrigger className="h-9 text-xs font-bold"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="open">Open</SelectItem>
+                                <SelectItem value="pending">Pending</SelectItem>
+                                <SelectItem value="resolved">Resolved</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1.5">Assigned Agent</p>
+                        <Select
+                            value={conversation.assigned_staff_id || 'unassigned'}
+                            onValueChange={(v) => {
+                                const staffMember = staff.find((s) => s.id === v);
+                                assignConversation(conversation.id, v === 'unassigned' ? null : v, staffMember?.full_name);
+                            }}
+                        >
+                            <SelectTrigger className="h-9 text-xs font-bold"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="unassigned">Unassigned</SelectItem>
+                                {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        {conversationAssignee && (
+                            <p className="text-[10px] text-slate-400 font-semibold mt-1">Currently: {conversationAssignee.full_name}</p>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <div className="p-5 space-y-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Change Status</p>
