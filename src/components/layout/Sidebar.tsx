@@ -13,7 +13,7 @@ import {
     ChevronsLeft,
     ChevronsRight,
     Compass,
-    Settings,
+    Settings as SettingsIcon,
     LayoutList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -55,7 +55,7 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: { collapsed?: b
             label: 'Admin',
             items: [
                 ...(user?.role === 'admin' ? [{ label: t('staff'), icon: Users, href: '/staff' }] : []),
-                { label: 'WhatsApp Settings', icon: Settings, href: '/settings/whatsapp' },
+                { label: 'Settings', icon: SettingsIcon, href: '/settings' },
             ],
         }] : []),
     ];
