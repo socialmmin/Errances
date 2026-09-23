@@ -1,6 +1,7 @@
 import { pool } from '../db.js';
 import { broadcastChange } from '../realtime.js';
 import * as leadRepo from './leadRepo.js';
+import { canonicalPhone, phoneDigits, withinSession } from './whatsappPhone.js';
 
 export function normalizePhone(phone: string): string {
     return (phone || '').replace(/\D/g, '');
@@ -36,7 +37,8 @@ export type Conversation = {
 };
 
 export async function getOrCreateConversation(phone: string): Promise<Conversation> {
-    const { rows } = await pool.query<Conversation>('SELECT * FROM whatsapp_conversations WHERE phone = $1', [phone]);
+    phone = canonicalPhone(phone);
+    const { rows } = await pool.query<Conversation>("SELECT * FROM whatsapp_conversations WHERE regexp_replace(phone, '[^0-9]', '', 'g') = $1 ORDER BY last_inbound_at DESC NULLS LAST LIMIT 1", [phoneDigits(phone)]);
     if (rows[0]) return rows[0];
 
     const { rows: created } = await pool.query<Conversation>(
@@ -171,26 +173,38 @@ export async function recordOutboundMessage(opts: {
 
 /** Applies a Twilio status-callback update to the matching message, by Twilio MessageSid. */
 export async function applyStatusCallback(twilioSid: string, status: string, errorCode?: string, errorMessage?: string) {
+    const statuses = ['queued', 'sending', 'sent', 'failed', 'undelivered', 'delivered', 'read'];
+    if (!statuses.includes(status)) return null;
+    const friendlyErrors: Record<string, string> = {
+        '63024': 'Recipient could not receive this WhatsApp message. Check the full international number and WhatsApp availability.',
+        '63016': 'The 24-hour customer service window is closed. Use an approved template and wait for a customer reply.',
+        '63049': 'Meta did not deliver this message. Review the template category and recipient restrictions.',
+    };
     const { rows } = await pool.query(
         `UPDATE whatsapp_messages SET status = $1, error_code = $2, error_message = $3
-         WHERE twilio_sid = $4
+         WHERE twilio_sid = $4 AND array_position($5::text[], status) <= array_position($5::text[], $1)
          RETURNING *`,
-        [status, errorCode || null, errorMessage || null, twilioSid]
+        [status, errorCode || null, errorMessage || (errorCode ? friendlyErrors[errorCode] || `Twilio error ${errorCode}` : null), twilioSid, statuses]
     );
     if (!rows[0]) return null;
     broadcastChange('whatsapp_messages', 'UPDATE', { new: rows[0] });
+    if (status === 'failed' || status === 'undelivered') {
+        const job = await pool.query("UPDATE whatsapp_automation_outbox SET status='failed',error=$2,updated_at=NOW() WHERE twilio_sid=$1 RETURNING conversation_id", [twilioSid, rows[0].error_message || status]);
+        if (job.rows[0]) {
+            const c = await pool.query("UPDATE whatsapp_conversations SET automation_error=$2,bot_paused=TRUE,status='pending' WHERE id=$1 RETURNING *", [job.rows[0].conversation_id, rows[0].error_message || status]);
+            broadcastChange('whatsapp_conversations', 'UPDATE', { new: c.rows[0] });
+        }
+    }
     return rows[0];
 }
 
 /** Whether an agent can still send a free-form session message, per WhatsApp's 24h customer-care window. */
 export function isWithinSessionWindow(conversation: Pick<Conversation, 'last_inbound_at'>): boolean {
-    if (!conversation.last_inbound_at) return false;
-    const windowMs = 24 * 60 * 60 * 1000;
-    return Date.now() - new Date(conversation.last_inbound_at).getTime() < windowMs;
+    return withinSession(conversation.last_inbound_at);
 }
 
 export async function getConversationByPhone(phone: string): Promise<Conversation | null> {
-    const { rows } = await pool.query<Conversation>('SELECT * FROM whatsapp_conversations WHERE phone = $1', [phone]);
+    const { rows } = await pool.query<Conversation>("SELECT * FROM whatsapp_conversations WHERE regexp_replace(phone, '[^0-9]', '', 'g') = $1 ORDER BY last_inbound_at DESC NULLS LAST LIMIT 1", [phoneDigits(phone)]);
     return rows[0] ?? null;
 }
 

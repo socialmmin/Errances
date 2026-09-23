@@ -424,7 +424,7 @@ export async function getWhatsAppSettings() {
     return response.json();
 }
 
-export async function updateWhatsAppSettings(payload: { businessName?: string; defaultTemplateId?: string | null; sessionWindowHours?: number }) {
+export async function updateWhatsAppSettings(payload: { businessName?: string; defaultTemplateId?: string | null; sessionWindowHours?: number; automationEnabled?: boolean }) {
     const token = getAuthToken();
     const response = await fetch(`${API_BASE}/api/whatsapp/settings`, {
         method: 'PATCH',

@@ -1,7 +1,18 @@
 import { pool } from '../db.js';
 import { broadcastChange } from '../realtime.js';
 import { getClient } from './twilioService.js';
-import { isTwilioConfigured } from '../config.js';
+import { config, isTwilioConfigured } from '../config.js';
+
+async function contentRequest(path: string, body: unknown) {
+    const response = await fetch(`https://content.twilio.com/v1/${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${Buffer.from(`${config.twilio.accountSid}:${config.twilio.authToken}`).toString('base64')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(15000),
+    });
+    const data = await response.json() as any;
+    if (!response.ok) throw new Error(data.message || 'Twilio content request failed');
+    return data;
+}
 
 export type TemplateRow = {
     id: string;
@@ -32,6 +43,8 @@ function mapTwilioStatus(status: string | undefined): TemplateRow['status'] {
         case 'approved': return 'approved';
         case 'rejected': return 'rejected';
         case 'pending': return 'pending';
+        case 'received': return 'pending';
+        case 'in_review': return 'pending';
         case 'paused': return 'paused';
         case 'disabled': return 'disabled';
         default: return 'draft';
@@ -48,18 +61,19 @@ function extractBody(types: Record<string, any>): { contentType: string; body: s
 /** Pulls every Content resource (+ its WhatsApp approval status) from Twilio and
  *  upserts it locally by twilio_content_sid — the source of truth for approval
  *  status is always Twilio, never something we fabricate or infer locally. */
-export async function syncTemplatesFromTwilio(actorId: string, actorName: string): Promise<{ synced: number }> {
+export async function syncTemplatesFromTwilio(actorId: string | null, actorName: string): Promise<{ synced: number }> {
     if (!isTwilioConfigured()) throw new Error('Twilio is not configured on the server');
 
     const contents = await getClient().content.v2.contentAndApprovals.list({ pageSize: 200 });
     let synced = 0;
 
     for (const c of contents) {
-        const approval = (c.approvalRequests as any) || {};
+        const rawApproval = (c.approvalRequests as any) || {};
+        const approval = rawApproval.whatsapp || rawApproval;
         const { contentType, body, buttons } = extractBody(c.types as any);
         const status = mapTwilioStatus(approval.status);
-        const category = approval.category || 'utility';
-        const rejectionReason = approval.rejectionReason || null;
+        const category = (approval.category || 'utility').toLowerCase();
+        const rejectionReason = approval.rejection_reason || approval.rejectionReason || null;
         const variableKeys = Object.keys((c.variables as any) || {});
 
         await pool.query(
@@ -75,6 +89,7 @@ export async function syncTemplatesFromTwilio(actorId: string, actorName: string
                 rejection_reason = EXCLUDED.rejection_reason,
                 content_type = EXCLUDED.content_type,
                 buttons = EXCLUDED.buttons,
+                sample_values = EXCLUDED.sample_values,
                 synced_at = NOW(),
                 updated_at = NOW()`,
             [
@@ -129,14 +144,12 @@ export async function createTemplate(input: CreateTemplateInput): Promise<Templa
         types['twilio/text'] = { body: input.body };
     }
 
-    const content = await getClient().content.v1.contents.create({
-        contentCreateRequest: {
-            friendlyName: input.name,
+    const content = await contentRequest('Content', {
+            friendly_name: input.name,
             language: input.language,
             variables: input.sampleValues || {},
             types: types as any,
-        },
-    } as any);
+    });
 
     const variableKeys = Object.keys(input.sampleValues || {});
     const { rows } = await pool.query<TemplateRow>(
@@ -165,14 +178,12 @@ export async function submitTemplateForApproval(templateId: string, category: st
     if (!template) throw new Error('Template not found');
     if (template.status === 'approved') throw new Error('This template is already approved and cannot be resubmitted');
 
-    const approval = await getClient()
-        .content.v1.contents.get(template.twilio_content_sid)
-        .approvalCreate.create({ contentApprovalRequest: { name: template.name, category } } as any);
+    const approval = await contentRequest(`Content/${template.twilio_content_sid}/ApprovalRequests/whatsapp`, { name: template.name, category: category.toUpperCase() });
 
     const status = mapTwilioStatus((approval as any).status);
     const { rows } = await pool.query<TemplateRow>(
         `UPDATE whatsapp_templates SET status = $1, category = $2, rejection_reason = $3, updated_at = NOW() WHERE id = $4 RETURNING *`,
-        [status, category, (approval as any).rejectionReason || null, templateId]
+        [status, (approval.category || category).toLowerCase(), approval.rejection_reason || approval.rejectionReason || null, templateId]
     );
     broadcastChange('whatsapp_templates', 'UPDATE', { new: rows[0] });
     return rows[0];
@@ -192,8 +203,8 @@ export async function refreshTemplateStatus(templateId: string): Promise<Templat
     const status = mapTwilioStatus(wa?.status);
 
     const { rows } = await pool.query<TemplateRow>(
-        `UPDATE whatsapp_templates SET status = $1, rejection_reason = $2, synced_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *`,
-        [status, wa?.rejectionReason || null, templateId]
+        `UPDATE whatsapp_templates SET status = $1, rejection_reason = $2, category = COALESCE($4, category), synced_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *`,
+        [status, wa?.rejection_reason || wa?.rejectionReason || null, templateId, wa?.category?.toLowerCase() || null]
     );
     broadcastChange('whatsapp_templates', 'UPDATE', { new: rows[0] });
     return rows[0];

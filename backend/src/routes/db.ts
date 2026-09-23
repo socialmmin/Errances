@@ -25,7 +25,7 @@ const TABLES: Record<string, TableConfig> = {
             'tour_interest', 'requirement', 'selected_package', 'selection_timestamp', 'budget', 'expected_closing_date',
             'travel_date', 'assigned_staff_id', 'lead_owner_id', 'priority', 'dob', 'gender', 'passport_number', 'photo_url',
             'address', 'city', 'state', 'country', 'pincode', 'next_action', 'last_contacted_at',
-            'follow_up_date', 'follow_up_time', 'follow_up_type', 'follow_up_notes', 'notes', 'created_at',
+            'follow_up_date', 'follow_up_time', 'follow_up_type', 'follow_up_notes', 'notes', 'enquiry_data', 'created_at',
         ],
         canRead: authed,
         canWrite: authed,
@@ -61,7 +61,7 @@ const TABLES: Record<string, TableConfig> = {
     whatsapp_conversations: {
         columns: [
             'id', 'phone', 'stage', 'selected_package', 'contact_lead_id', 'assigned_staff_id', 'status',
-            'unread_count', 'last_message_at', 'last_message_preview', 'last_inbound_at', 'channel',
+            'unread_count', 'last_message_at', 'last_message_preview', 'last_inbound_at', 'channel', 'automation_step', 'automation_data', 'bot_paused', 'automation_error', 'opted_out',
             'created_at', 'updated_at',
         ],
         canRead: authed,

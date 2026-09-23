@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
-import { config } from './config.js';
+import { config, isTwilioConfigured } from './config.js';
 import { migrate } from './db.js';
 import { authenticate } from './middleware/authenticate.js';
 import { setIo } from './realtime.js';
@@ -15,6 +15,8 @@ import webhookRoutes from './routes/webhooks.js';
 import leadsRoutes from './routes/leads.js';
 
 import { startBaileys, checkAndSendTravelMessages } from './services/baileysService.js';
+import { drainEnquiryOutbox } from './services/enquiryAutomation.js';
+import { syncTemplatesFromTwilio } from './services/whatsappTemplateService.js';
 
 async function main() {
     await migrate();
@@ -46,6 +48,19 @@ async function main() {
     });
 
     startBaileys().catch((err) => console.error('[baileys] failed to start:', err));
+    setInterval(() => drainEnquiryOutbox().catch(err => console.error('[enquiry] worker failed:', err)), 2000);
+    if (isTwilioConfigured()) {
+        let syncing = false;
+        const syncApprovals = async () => {
+            if (syncing) return;
+            syncing = true;
+            try { await syncTemplatesFromTwilio(null, 'Automation'); }
+            catch (err) { console.error('[templates] approval sync failed:', err); }
+            finally { syncing = false; }
+        };
+        void syncApprovals();
+        setInterval(syncApprovals, 5 * 60 * 1000);
+    }
     setInterval(() => checkAndSendTravelMessages().catch((err) => console.error('[travel] job failed:', err)), 60 * 60 * 1000);
 }
 

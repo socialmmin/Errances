@@ -330,6 +330,29 @@ CREATE TABLE IF NOT EXISTS whatsapp_settings (
 );
 INSERT INTO whatsapp_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
+ALTER TABLE whatsapp_settings ADD COLUMN IF NOT EXISTS automation_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS automation_step TEXT NOT NULL DEFAULT 'welcome';
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS automation_data JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS bot_paused BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS automation_error TEXT;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS opted_out BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS enquiry_data JSONB NOT NULL DEFAULT '{}';
+
+CREATE TABLE IF NOT EXISTS whatsapp_automation_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    inbound_sid TEXT UNIQUE NOT NULL,
+    conversation_id UUID NOT NULL REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,
+    template_key TEXT NOT NULL,
+    variables JSONB NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sending','sent','failed','cancelled')),
+    error TEXT,
+    twilio_sid TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_automation_queue ON whatsapp_automation_outbox(status, created_at);
+ALTER TABLE whatsapp_automation_outbox ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_contact_lead_id ON whatsapp_conversations(contact_lead_id);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_assigned_staff_id ON whatsapp_conversations(assigned_staff_id);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_last_message_at ON whatsapp_conversations(last_message_at);

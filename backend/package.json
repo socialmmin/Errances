@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "build": "tsc -p tsconfig.json && node scripts/copy-schema.mjs",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.685.0",

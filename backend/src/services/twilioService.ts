@@ -1,5 +1,6 @@
 import twilio from 'twilio';
 import { config, isTwilioConfigured } from '../config.js';
+import { canonicalPhone } from './whatsappPhone.js';
 
 let client: twilio.Twilio | null = null;
 
@@ -25,7 +26,7 @@ export async function sendTwilioWhatsAppMessage(
         throw new Error('Twilio is not configured on the server');
     }
 
-    const formattedTo = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
+    const formattedTo = `whatsapp:${canonicalPhone(to)}`;
     const formattedFrom = config.twilio.whatsappNumber.startsWith('whatsapp:')
         ? config.twilio.whatsappNumber
         : `whatsapp:${config.twilio.whatsappNumber}`;

@@ -114,6 +114,11 @@ export type LeadPayment = {
 };
 
 export type WhatsAppConversation = {
+    automation_step?: string;
+    automation_data?: Record<string, string>;
+    bot_paused?: boolean;
+    automation_error?: string | null;
+    opted_out?: boolean;
     id: string;
     phone: string;
     stage: string;
@@ -188,6 +193,7 @@ export type WhatsAppSettings = {
         business_name: string | null;
         default_template_id: string | null;
         session_window_hours: number;
+        automation_enabled?: boolean;
         updated_at: string;
     } | null;
 };

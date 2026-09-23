@@ -6,6 +6,9 @@ import { sendTwilioWhatsAppMessage, listWhatsAppMessages } from '../services/twi
 import { config, isTwilioConfigured } from '../config.js';
 import { getBaileysStatus, sendBaileysMessage } from '../services/baileysService.js';
 import { checkAndSendTravelMessagesTwilio } from '../services/twilioTravelJob.js';
+import { automationOverview, setupEnquiryTemplates } from '../services/enquiryAutomation.js';
+import { canonicalPhone } from '../services/whatsappPhone.js';
+import { broadcastChange } from '../realtime.js';
 import {
     getOrCreateConversation, getConversationByPhone, recordOutboundMessage,
     isWithinSessionWindow, markConversationRead,
@@ -47,16 +50,29 @@ router.get('/twilio-messages', requireAuth, async (_req, res) => {
 
 // --- Outgoing message ---
 router.post('/send', requireAuth, sendLimiter, async (req, res) => {
-    // `content`, when given, overrides what's persisted in whatsapp_messages while `message`
-    // is still what's actually sent to Twilio — used for image attachments, where Twilio gets
-    // a short placeholder body but the CRM chat stores the full data URL to render inline.
-    const { to, message, content, contentSid, contentVariables, leadId } = req.body || {};
+    // Resolve replies from the stored incoming conversation, never a guessed country code.
+    const { to, message, contentSid, contentVariables, leadId, conversationId } = req.body || {};
     if (!to || (!message && !contentSid)) {
         return res.status(400).json({ error: 'Missing to or message' });
     }
 
     try {
-        const conversation = await getOrCreateConversation(to.replace('whatsapp:', '').trim());
+        const linked = conversationId
+            ? (await pool.query('SELECT * FROM whatsapp_conversations WHERE id=$1', [conversationId])).rows[0]
+            : leadId ? (await pool.query('SELECT * FROM whatsapp_conversations WHERE contact_lead_id=$1 ORDER BY last_inbound_at DESC NULLS LAST LIMIT 1', [leadId])).rows[0] : null;
+        if (conversationId && !linked) return res.status(404).json({ error: 'Conversation not found' });
+        const phone = canonicalPhone(linked?.phone || to);
+        const conversation = linked || await getOrCreateConversation(phone);
+        if ((conversation as any).opted_out) return res.status(409).json({ error: 'This contact opted out. Wait for them to send START.' });
+        let body = String(message || '');
+        if (contentSid) {
+            const template = (await pool.query("SELECT * FROM whatsapp_templates WHERE twilio_content_sid=$1 AND is_active=TRUE AND status='approved'", [contentSid])).rows[0];
+            if (!template) return res.status(400).json({ error: 'Choose an active, approved template from the template library.' });
+            const keys = [...String(template.body_preview || '').matchAll(/\{\{(\d+)\}\}/g)].map(m => m[1]);
+            if (keys.some(key => typeof contentVariables?.[key] !== 'string' || !contentVariables[key].trim())) return res.status(400).json({ error: 'Complete all template fields before sending.' });
+            body = String(template.body_preview || '').replace(/\{\{(\d+)\}\}/g, (_, key) => contentVariables[key]);
+        }
+        if (body.length > 4096) return res.status(400).json({ error: 'Message must be 4096 characters or fewer.' });
 
         // WhatsApp only allows free-form session messages within 24h of the customer's last
         // inbound message; outside that window, an approved template is required.
@@ -67,21 +83,42 @@ router.post('/send', requireAuth, sendLimiter, async (req, res) => {
             });
         }
 
-        const result = await sendTwilioWhatsAppMessage(to, message, { contentSid, contentVariables });
+        const paused = (await pool.query('UPDATE whatsapp_conversations SET bot_paused=TRUE WHERE id=$1 RETURNING *', [conversation.id])).rows[0];
+        await pool.query("UPDATE whatsapp_automation_outbox SET status='cancelled' WHERE conversation_id=$1 AND status='queued'", [conversation.id]);
+        broadcastChange('whatsapp_conversations', 'UPDATE', { new: paused });
+        const result = await sendTwilioWhatsAppMessage(phone, body, { contentSid, contentVariables });
         const { message: stored } = await recordOutboundMessage({
-            phone: to.replace('whatsapp:', '').trim(),
-            leadId: leadId || conversation.contact_lead_id || null,
-            body: content || (contentSid ? (message || `[Template ${contentSid}]`) : message),
+            phone,
+            leadId: conversation.contact_lead_id || leadId || null,
+            body,
             twilioSid: result.sid,
             twilioStatus: result.status,
             sentBy: req.user!.sub,
             contentSid,
         });
-
         res.json({ success: true, sid: result.sid, message: stored });
     } catch (err: any) {
         res.status(500).json({ error: err.message || 'Failed to send WhatsApp message' });
     }
+});
+
+router.get('/automation', requireAuth, async (_req, res) => {
+    try { res.json(await automationOverview()); } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+router.post('/automation/setup', requireAuth, templateSyncLimiter, async (req, res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    try { res.json({ results: await setupEnquiryTemplates(req.user!.sub, req.user!.email) }); }
+    catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+router.patch('/conversations/:id/automation', requireAuth, async (req, res) => {
+    if (typeof req.body.paused !== 'boolean') return res.status(400).json({ error: 'paused must be a boolean' });
+    try {
+        const { rows } = await pool.query('UPDATE whatsapp_conversations SET bot_paused=$2, automation_error=NULL, updated_at=NOW() WHERE id=$1 RETURNING *', [req.params.id, req.body.paused]);
+        if (!rows[0]) return res.status(404).json({ error: 'Conversation not found' });
+        if (req.body.paused) await pool.query("UPDATE whatsapp_automation_outbox SET status='cancelled' WHERE conversation_id=$1 AND status='queued'", [req.params.id]);
+        broadcastChange('whatsapp_conversations', 'UPDATE', { new: rows[0] });
+        res.json({ data: rows[0] });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 // --- Session window status (drives the UI's "template required" banner) ---
@@ -241,7 +278,7 @@ router.delete('/templates/:id', requireAuth, async (req, res) => {
 router.get('/settings', requireAuth, async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT * FROM whatsapp_settings WHERE id = 1');
-        const { rows: templateCountRows } = await pool.query(`SELECT COUNT(*)::int AS count FROM whatsapp_templates WHERE is_active = TRUE`);
+        const { rows: templateCountRows } = await pool.query(`SELECT COUNT(*)::int AS count FROM whatsapp_templates WHERE is_active = TRUE AND status='approved'`);
         res.json({
             connected: isTwilioConfigured(),
             whatsappNumber: config.twilio.whatsappNumber || null,
@@ -259,16 +296,19 @@ router.get('/settings', requireAuth, async (req, res) => {
 
 router.patch('/settings', requireAuth, async (req, res) => {
     if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
-    const { businessName, defaultTemplateId, sessionWindowHours } = req.body || {};
+    const { businessName, defaultTemplateId, sessionWindowHours, automationEnabled } = req.body || {};
+    if (sessionWindowHours !== undefined && sessionWindowHours !== 24) return res.status(400).json({ error: 'WhatsApp fixes the customer service window at 24 hours.' });
+    if (automationEnabled !== undefined && typeof automationEnabled !== 'boolean') return res.status(400).json({ error: 'Invalid automation setting' });
     try {
         const { rows } = await pool.query(
             `UPDATE whatsapp_settings
              SET business_name = COALESCE($1, business_name),
-                 default_template_id = $2,
-                 session_window_hours = COALESCE($3, session_window_hours),
+                 default_template_id = CASE WHEN $6 THEN $2::uuid ELSE default_template_id END,
+                 session_window_hours = 24,
+                 automation_enabled = COALESCE($3, automation_enabled),
                  updated_by = $4, updated_by_name = $5, updated_at = NOW()
              WHERE id = 1 RETURNING *`,
-            [businessName ?? null, defaultTemplateId ?? null, sessionWindowHours ?? null, req.user!.sub, req.user!.email]
+            [businessName ?? null, defaultTemplateId ?? null, automationEnabled ?? null, req.user!.sub, req.user!.email, Object.hasOwn(req.body, 'defaultTemplateId')]
         );
         await logConversationActivity(null, 'whatsapp_settings', 'WhatsApp settings updated').catch(() => {});
         res.json({ data: rows[0] });
