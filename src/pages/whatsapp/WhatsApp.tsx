@@ -583,16 +583,22 @@ export function WhatsApp() {
         fetchStaff();
     }, [fetchLeads, fetchStaff]);
 
-    // Ensure matching dummy lead exists for all staff members who have a phone number
+    // Ensure matching dummy lead exists for all staff members who have a phone number.
+    // Reads rawLeads via a ref (not a dependency) — depending on rawLeads directly created a
+    // runaway loop: this effect calls fetchLeads(), which changes the rawLeads reference,
+    // which re-triggered the effect, indefinitely, freezing the page under constant re-renders.
+    const rawLeadsRef = useRef(rawLeads);
+    rawLeadsRef.current = rawLeads;
+
     useEffect(() => {
         if (staff.length === 0) return;
-        
+
         const syncStaffDummyLeads = async () => {
             let needsFetch = false;
             for (const member of staff) {
                 if (!member.phone || member.phone.trim() === '') continue;
-                
-                const exists = rawLeads.some(l => l.id === member.id);
+
+                const exists = rawLeadsRef.current.some(l => l.id === member.id);
                 if (!exists) {
                     console.log('WhatsApp: Creating dummy lead for staff', member.id);
                     try {
@@ -612,7 +618,7 @@ export function WhatsApp() {
                     }
                 } else {
                     // Keep dummy lead in sync if name, email, or phone changed
-                    const dummy = rawLeads.find(l => l.id === member.id);
+                    const dummy = rawLeadsRef.current.find(l => l.id === member.id);
                     if (dummy && (dummy.phone !== member.phone || dummy.name !== member.full_name || dummy.email !== member.email)) {
                         console.log('WhatsApp: Updating dummy lead for staff', member.id);
                         try {
@@ -634,7 +640,7 @@ export function WhatsApp() {
         };
         
         syncStaffDummyLeads();
-    }, [staff, rawLeads, fetchLeads]);
+    }, [staff, fetchLeads]);
 
     // Fetch last messages to show in the sidebar list
     const fetchLastMessages = async () => {
