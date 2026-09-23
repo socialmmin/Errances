@@ -1,3 +1,4 @@
+import { getKnowledge, knowledgeSchema, hotlineRules } from '../services/hotlineKnowledge.js';
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/authenticate.js';
@@ -272,6 +273,23 @@ router.delete('/templates/:id', requireAuth, async (req, res) => {
     } catch (err: any) {
         res.status(400).json({ error: err.message || 'Failed to delete template' });
     }
+});
+
+// Structured, database-backed global hotline knowledge.
+router.get('/knowledge', requireAuth, async (_req, res) => {
+    try { const document = await getKnowledge(); const {rows}=await pool.query("SELECT count(*)::int AS total, count(*) FILTER (WHERE status='active')::int AS active FROM tours"); res.json({document,rules:hotlineRules,catalogue:rows[0]}); }
+    catch { res.status(500).json({error:'Unable to load hotline knowledge'}); }
+});
+router.put('/knowledge', requireAuth, async (req,res) => {
+    if (!canManageWhatsapp(req.user?.role)) return res.status(403).json({error:'Forbidden'});
+    const parsed=knowledgeSchema.safeParse(req.body);
+    if (!parsed.success || new Set(parsed.data?.offices.map(o=>o.id)).size!==5) return res.status(400).json({error:'Check the five offices, local hours, time zones and holiday dates.'});
+    try {
+      for(const o of parsed.data.offices) if(o.assigned_staff_id) {const {rowCount}=await pool.query("SELECT id FROM staffs WHERE id=$1 AND status='active'",[o.assigned_staff_id]);if(!rowCount)return res.status(400).json({error:'Choose an active staff member for office routing.'});}
+      await getKnowledge();
+      await pool.query('UPDATE whatsapp_knowledge SET document=$1,updated_by=$2,updated_at=NOW() WHERE id=1',[JSON.stringify(parsed.data),req.user!.sub]);
+      res.json({document:parsed.data});
+    } catch {res.status(500).json({error:'Unable to save hotline knowledge'});}
 });
 
 // --- Admin: connection/settings status (never returns secrets) ---

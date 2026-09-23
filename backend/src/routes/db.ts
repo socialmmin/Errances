@@ -32,7 +32,7 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: authed,
     },
     tours: {
-        columns: ['id', 'title', 'destination', 'price', 'duration', 'description', 'itinerary', 'departure_city', 'availability', 'accommodation', 'meals', 'transport', 'cancellation_policy', 'inclusions', 'exclusions', 'images', 'status', 'created_at'],
+        columns: ['id', 'title', 'destination', 'price', 'duration', 'description', 'itinerary', 'source_url', 'category', 'duration_note', 'price_on_request', 'departure_city', 'availability', 'accommodation', 'meals', 'transport', 'cancellation_policy', 'inclusions', 'exclusions', 'images', 'status', 'created_at'],
         canRead: authed,
         canWrite: authed,
         canDelete: authed,

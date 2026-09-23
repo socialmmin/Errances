@@ -1,3 +1,4 @@
+import { needsAgent } from './frontdeskFlow.js';
 export const questions = [
   {
     key: "name",
@@ -73,7 +74,7 @@ export type FlowResult = FlowState & {
   error?: string;
 };
 const greeting =
-  /^(hi+|hello|hey|start|menu|restart|good morning|good evening)$/i;
+  /^(hi+|hello|hey|bonjour|salut|start|menu|restart|good morning|good evening)$/i;
 
 export function parseTravelDate(input: string): string | null {
   let date = input.trim();
@@ -104,7 +105,7 @@ export function advanceEnquiry(
 ): FlowResult {
   const text = input.trim();
   if (/^(stop|unsubscribe)$/i.test(text)) return { ...state, paused: true };
-  if (/^(agent|human|help)$/i.test(text))
+  if (needsAgent(text) || /^(help)$/i.test(text))
     return { ...state, paused: true, templateKey: "handoff" };
   if (/^(restart|menu|start)$/i.test(text))
     return { step: "name", answers: {}, paused: false, templateKey: "name" };

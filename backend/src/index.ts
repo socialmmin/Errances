@@ -15,7 +15,7 @@ import whatsappRoutes from './routes/whatsapp.js';
 import webhookRoutes from './routes/webhooks.js';
 import leadsRoutes from './routes/leads.js';
 
-import { startBaileys, checkAndSendTravelMessages } from './services/baileysService.js';
+import { startBaileys } from './services/baileysService.js';
 import { drainEnquiryOutbox } from './services/enquiryAutomation.js';
 import { syncTemplatesFromTwilio } from './services/whatsappTemplateService.js';
 
@@ -63,7 +63,7 @@ async function main() {
         void syncApprovals();
         setInterval(syncApprovals, 5 * 60 * 1000);
     }
-    setInterval(() => checkAndSendTravelMessages().catch((err) => console.error('[travel] job failed:', err)), 60 * 60 * 1000);
+
 }
 
 main().catch((err) => {

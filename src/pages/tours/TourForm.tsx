@@ -32,6 +32,7 @@ const tourSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters"),
   destination: z.string().min(2, "Destination is required"),
   duration: z.coerce.number().min(1, "Duration must be at least 1 day"),
+  price_on_request: z.boolean(),
   price: z.coerce.number().min(0, "Price must be positive"),
   description: z.string().min(10, "Description needs to be longer"),
   status: z.enum(["active", "inactive"]),
@@ -65,6 +66,7 @@ export function TourForm() {
   const form = useForm<TourFormValues>({
     resolver: zodResolver(tourSchema) as any,
     defaultValues: {
+      price_on_request: existingTour?.price_on_request || false,
       title: existingTour?.title || "",
       destination: existingTour?.destination || "",
       duration: existingTour?.duration || 1,
@@ -87,6 +89,7 @@ export function TourForm() {
     if (existingTour) {
       setImages(existingTour.images || []);
       form.reset({
+        price_on_request: existingTour.price_on_request || false,
         title: existingTour.title,
         destination: existingTour.destination,
         duration: existingTour.duration,
@@ -183,6 +186,7 @@ export function TourForm() {
           onSubmit={form.handleSubmit(onSubmit as any)}
           className="space-y-8 bg-white p-6 rounded-lg border border-slate-100 shadow-sm"
         >
+          <label className="flex gap-2 items-center text-sm"><input type="checkbox" {...form.register("price_on_request")} />Price on request — an advisor prepares the quote</label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <FormField
               control={form.control as any}

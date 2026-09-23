@@ -52,7 +52,7 @@ type ChatMessage = {
   media_url?: string;
   conversation_id?: string;
 };
-const steps = [
+const legacySteps = [
   ["name", "Full name"],
   ["destination", "Destination"],
   ["travel_date", "Travel date"],
@@ -124,6 +124,13 @@ export function WhatsApp() {
   const phone = selected?.phone || lead?.whatsapp_number || lead?.phone || "";
   const name = lead?.name || phone || "Conversation";
   const answers = selected?.automation_data || {};
+  const steps = answers.language ? [
+    ['language','Language'], ['service','Service'], ['office','Preferred office'], ['name','Full name'],
+    ['package_title','Selected package'], ['origin','Departure city / airport'], ['destination','Destination'],
+    ['dates','Travel dates'], ['travellers','Travellers'], ['cabin','Cabin'], ['baggage','Baggage'],
+    ['rooms','Rooms / hotel category'], ['preferences','Preferences'], ['quote_status','Quote status'],
+    ['initial_request','Original request'], ['request','Latest request'],
+  ] : legacySteps;
   const active = Boolean(selected || newLeadId);
   const lastInbound = selected?.last_inbound_at || windowState?.lastInboundAt;
   const openWindow = Boolean(
@@ -881,14 +888,14 @@ export function WhatsApp() {
               <div className="p-5">
                 <div className="flex justify-between text-[10px] uppercase tracking-widest text-slate-400">
                   <span>Travel brief</span>
-                  <span>{Object.keys(answers).length}/8</span>
+                  <span>{steps.filter(([key]) => answers[key]).length}/{steps.length}</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-slate-100 mt-3 mb-5">
                   <div
                     className="h-full rounded-full bg-emerald-600 transition-all"
                     style={{
                       width:
-                        Math.min((Object.keys(answers).length / 8) * 100, 100) +
+                        Math.min((steps.filter(([key]) => answers[key]).length / steps.length) * 100, 100) +
                         "%",
                     }}
                   />
@@ -901,7 +908,7 @@ export function WhatsApp() {
                           "w-5 h-5 rounded-full grid place-items-center shrink-0",
                           answers[key]
                             ? "bg-emerald-100 text-emerald-700"
-                            : selected?.automation_step === key
+                            : (selected?.automation_step === key || selected?.automation_step === `desk_${key}`)
                               ? "bg-amber-100 text-amber-700"
                               : "bg-slate-100 text-slate-300",
                         )}

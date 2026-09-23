@@ -126,6 +126,8 @@ export function TourDetails() {
           <Card>
             <CardContent className="pt-6">
               <h2 className="text-lg font-semibold mb-4">Travel details</h2>
+              {tour.duration_note && <p className="text-sm text-amber-800 bg-amber-50 p-3 rounded mb-4">{tour.duration_note} Please confirm with an advisor.</p>}
+              {tour.source_url && <a className="text-sm text-teal-700 underline block mb-4" href={tour.source_url} target="_blank" rel="noopener noreferrer">View source catalogue</a>}
               <dl className="grid gap-5 sm:grid-cols-2">
                 {details.map(([label, value]) => (
                   <div key={label}>
@@ -175,7 +177,7 @@ export function TourDetails() {
               <div>
                 <p className="text-sm text-slate-500">Price per person</p>
                 <p className="text-3xl font-bold mt-1">
-                  {new Intl.NumberFormat("en-IE", {
+                  {tour.price_on_request ? "Quote on request" : new Intl.NumberFormat("en-IE", {
                     style: "currency",
                     currency: "EUR",
                   }).format(Number(tour.price))}
@@ -183,7 +185,7 @@ export function TourDetails() {
               </div>
               <p className="flex items-center gap-2 text-slate-600">
                 <Clock className="w-4 h-4" />
-                {tour.duration} days
+                {tour.duration_note ? "Duration to be confirmed" : `${tour.duration} days`}
               </p>
               <Button className="w-full" onClick={enquiry}>
                 Create enquiry for this package

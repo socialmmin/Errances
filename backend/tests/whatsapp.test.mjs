@@ -44,6 +44,9 @@ const fakeSend = async (to, body, options) => {
 
 before(async () => {
   await migrate();
+  const {getKnowledge}=await import("../dist/services/hotlineKnowledge.js");
+  const knowledge=await getKnowledge(); knowledge.enabled=false;
+  await pool.query("UPDATE whatsapp_knowledge SET document=$1 WHERE id=1",[JSON.stringify(knowledge)]);
   await migrate(); // Boot migrations must remain idempotent.
   actor = (await pool.query("SELECT * FROM staffs LIMIT 1")).rows[0];
   token = signToken({ sub: actor.id, email: actor.email, role: "admin" });
@@ -390,4 +393,22 @@ test("Unsigned webhook rejected; signed webhook accepted and deduplicated withou
     ).rows[0].n,
     1,
   );
+});
+
+test('Global hotline pre-empts queued questions for agent requests and persists the shared handoff', async () => {
+  const { getKnowledge } = await import('../dist/services/hotlineKnowledge.js');
+  const { frontdeskTemplates } = await import('../dist/services/frontdeskFlow.js');
+  const knowledge=await getKnowledge();knowledge.enabled=true;
+  await pool.query('UPDATE whatsapp_knowledge SET document=$1 WHERE id=1',[JSON.stringify(knowledge)]);
+  for(const [i,t] of frontdeskTemplates.entries()) await pool.query("INSERT INTO whatsapp_templates(name,twilio_content_sid,category,body_preview,status,language) VALUES($1,$2,'utility',$3,'approved',$4) ON CONFLICT(twilio_content_sid) DO UPDATE SET status='approved',category='utility',is_active=TRUE",[t.name,'HX'+String(i+100).padStart(32,'0'),t.body,t.language]);
+  const from='+447700900155';
+  await captureEnquiry({from,body:'Bonjour',sid:'SMglobal-welcome'});
+  await captureEnquiry({from,body:'I like to book a ticket with an agent',sid:'SMglobal-agent'});
+  const c=(await pool.query('SELECT * FROM whatsapp_conversations WHERE phone=$1',[from])).rows[0];
+  const lead=(await pool.query('SELECT * FROM leads WHERE id=$1',[c.contact_lead_id])).rows[0];
+  assert.equal(c.bot_paused,true);assert.equal(c.status,'pending');assert.equal(lead.priority,'high');assert.equal(lead.enquiry_data.service,'flight');assert.equal(lead.enquiry_data.language,'fr');assert.notEqual(lead.name,'I like to book a ticket with an agent');
+  assert.equal((await pool.query("SELECT status FROM whatsapp_automation_outbox WHERE inbound_sid='SMglobal-welcome'")).rows[0].status,'cancelled');
+  const previous=sent.length;await drainEnquiryOutbox(fakeSend);const outgoing=sent.slice(previous).filter(s=>s.to===from);assert.equal(outgoing.length,1);assert.match(outgoing[0].body,/conseillers/);assert.ok(outgoing[0].options.contentSid);
+  const k=frontdeskTemplates.find(t=>t.key==='desk_fr_handoff');await pool.query("UPDATE whatsapp_templates SET status='pending' WHERE name=$1",[k.name]);
+  await captureEnquiry({from,body:'conseiller',sid:'SMglobal-pending'});const beforeSend=sent.length;await drainEnquiryOutbox(fakeSend);assert.equal(sent.length,beforeSend);assert.match((await pool.query('SELECT automation_error FROM whatsapp_conversations WHERE id=$1',[c.id])).rows[0].automation_error,/approved Utility/);
 });

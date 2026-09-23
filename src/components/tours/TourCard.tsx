@@ -33,8 +33,8 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
                 </div>
                 <div className="absolute bottom-3 left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0">
                     <div className="flex items-center text-white font-black text-xl">
-                        <Euro className="w-5 h-5" />
-                        {Number(tour.price).toLocaleString()}
+                        {!tour.price_on_request && <Euro className="w-5 h-5" />}
+                        {tour.price_on_request ? 'Quote on request' : Number(tour.price).toLocaleString()}
                     </div>
                 </div>
             </div>
@@ -55,11 +55,11 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
                 <CardDescription className="line-clamp-2 text-xs font-medium text-slate-500 mb-4 leading-relaxed">
                     {tour.description}
                 </CardDescription>
-                <p className="text-lg font-semibold text-slate-900 mb-3">€{Number(tour.price).toLocaleString()} <span className="text-xs font-normal text-slate-500">per person</span></p>
+                <p className="text-lg font-semibold text-slate-900 mb-3">{tour.price_on_request ? "Quote on request" : `€${Number(tour.price).toLocaleString()}`} <span className="text-xs font-normal text-slate-500">{!tour.price_on_request && "per person"}</span></p>
                 <div className="flex flex-wrap items-center gap-2">
                     <div className="flex items-center bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
                         <Clock className="w-3 h-3 mr-1.5 text-indigo-500" />
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{tour.duration} Days</span>
+                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{tour.duration_note ? "Confirm duration" : `${tour.duration} Days`}</span>
                     </div>
                     <div className="flex items-center bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
                         <Calendar className="w-3 h-3 mr-1.5 text-emerald-500" />

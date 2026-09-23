@@ -212,6 +212,10 @@ export type TourPackage = {
     meals?: string;
     transport?: string;
     cancellation_policy?: string;
+    source_url?: string;
+    category?: string;
+    duration_note?: string;
+    price_on_request?: boolean;
     inclusions?: string[];
     exclusions?: string[];
     images: string[];

@@ -1,3 +1,9 @@
+import { getKnowledge } from "./hotlineKnowledge.js";
+import {
+  advanceFrontdesk,
+  frontdeskTemplates,
+  deskControl,
+} from "./frontdeskFlow.js";
 import { pool } from "../db.js";
 import { broadcastChange } from "../realtime.js";
 import {
@@ -16,13 +22,15 @@ import {
   syncTemplatesFromTwilio,
 } from "./whatsappTemplateService.js";
 
+const allTemplates = [...workflowTemplates, ...frontdeskTemplates];
+
 export async function setupEnquiryTemplates(
   actorId: string,
   actorName: string,
 ) {
   await syncTemplatesFromTwilio(actorId, actorName);
   const results = [];
-  for (const definition of workflowTemplates) {
+  for (const definition of allTemplates) {
     const { rows } = await pool.query(
       "SELECT * FROM whatsapp_templates WHERE name = $1 ORDER BY created_at LIMIT 1",
       [definition.name],
@@ -32,17 +40,20 @@ export async function setupEnquiryTemplates(
       if (!template)
         template = await createTemplate({
           name: definition.name,
-          language: "en",
+          language:
+            "language" in definition ? String(definition.language) : "en",
           category: "utility",
           body: definition.body,
           sampleValues:
-            definition.key === "confirm"
-              ? {
-                  "1": "Full name: Priya; Destination: Bali; Travel date: 20/12/2026; Travellers: 2 adults; Departure city: Chennai; Total budget: INR 150000; Email: skip; Special requirements: none",
-                }
-              : definition.key === "completed"
-                ? { "1": "EV-1024" }
-                : {},
+            "samples" in definition
+              ? (definition.samples as Record<string, string>)
+              : definition.key === "confirm"
+                ? {
+                    "1": "Full name: Priya; Destination: Bali; Travel date: 20/12/2026; Travellers: 2 adults; Departure city: Chennai; Total budget: INR 150000; Email: skip; Special requirements: none",
+                  }
+                : definition.key === "completed"
+                  ? { "1": "EV-1024" }
+                  : {},
           createdBy: actorId,
           createdByName: actorName,
         });
@@ -149,8 +160,16 @@ export async function captureEnquiry(input: {
         "SELECT automation_enabled FROM whatsapp_settings WHERE id = 1",
       )
     ).rows[0];
+    const knowledge = await getKnowledge(client);
+    const catalogue = knowledge.enabled
+      ? (
+          await client.query(
+            "SELECT id,title,destination,duration,duration_note,category,description,inclusions,status FROM tours WHERE status='active' ORDER BY title",
+          )
+        ).rows
+      : [];
     const restart = /^(start|restart|menu)$/i.test(input.body.trim());
-    const stop = /^(stop|unsubscribe)$/i.test(input.body.trim());
+    const stop = /^(stop|unsubscribe|arret|arrêt)$/i.test(input.body.trim());
     const state = {
       step: conversation.automation_step,
       answers: conversation.automation_data || {},
@@ -163,6 +182,7 @@ export async function captureEnquiry(input: {
       )
     ).rowCount;
     const control =
+      deskControl(input.body) ||
       /^(start|restart|menu|stop|unsubscribe|agent|human|help)$/i.test(
         input.body.trim(),
       );
@@ -171,10 +191,27 @@ export async function captureEnquiry(input: {
       settings?.automation_enabled &&
       input.body.trim() &&
       (!outstanding || control)
-        ? advanceEnquiry(state, input.body)
+        ? knowledge.enabled
+          ? advanceFrontdesk(state, input.body, knowledge, catalogue)
+          : advanceEnquiry(state, input.body)
         : state;
     const optedOut = stop ? true : restart ? false : conversation.opted_out;
     const answers = next.answers;
+    const handoff =
+      "templateKey" in next &&
+      (String(next.templateKey).endsWith("handoff") ||
+        String(next.templateKey).endsWith("no_packages"));
+    const selectedOffice = knowledge.offices.find(
+      (o) => o.id === answers.office_id,
+    );
+    let assignedStaff = conversation.assigned_staff_id;
+    if (handoff && selectedOffice?.assigned_staff_id) {
+      const staff = await client.query(
+        "SELECT id FROM staffs WHERE id=$1 AND status='active'",
+        [selectedOffice.assigned_staff_id],
+      );
+      if (staff.rowCount) assignedStaff = staff.rows[0].id;
+    }
     // Answers also live on the lead, without overwriting staff notes.
     const date = parseTravelDate(answers.travel_date || "");
     const budgetMatch = (answers.budget || "").match(
@@ -192,7 +229,7 @@ export async function captureEnquiry(input: {
           lead.id,
           phone,
           answers.name || null,
-          answers.destination || null,
+          answers.package_title || answers.destination || null,
           date,
           answers.city || null,
           answers.email && !/^skip$/i.test(answers.email)
@@ -200,11 +237,26 @@ export async function captureEnquiry(input: {
             : null,
           budgetMatch ? Number(budgetMatch[1].replace(/,/g, "")) : null,
           JSON.stringify(answers),
-          Object.keys(answers).length ? enquirySummary(answers) : null,
+          Object.keys(answers).length
+            ? knowledge.enabled
+              ? Object.entries(answers)
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join("; ")
+                  .slice(0, 4000)
+              : enquirySummary(answers)
+            : null,
           "completed" in next && Boolean(next.completed),
         ],
       )
     ).rows[0];
+    if (handoff) {
+      lead = (
+        await client.query(
+          "UPDATE leads SET next_action='Advisor review: quotation / service request',priority='high',assigned_staff_id=COALESCE($2,assigned_staff_id) WHERE id=$1 RETURNING *",
+          [lead.id, assignedStaff],
+        )
+      ).rows[0];
+    }
     conversation = (
       await client.query(
         `UPDATE whatsapp_conversations SET phone=$2, contact_lead_id=$3, last_inbound_at=NOW(), last_message_at=NOW(),
@@ -223,7 +275,15 @@ export async function captureEnquiry(input: {
         ],
       )
     ).rows[0];
-    if (stop || next.paused || restart)
+    if (assignedStaff && assignedStaff !== conversation.assigned_staff_id) {
+      conversation = (
+        await client.query(
+          "UPDATE whatsapp_conversations SET assigned_staff_id=$2 WHERE id=$1 RETURNING *",
+          [conversation.id, assignedStaff],
+        )
+      ).rows[0];
+    }
+    if (stop || next.paused || restart || control)
       await client.query(
         "UPDATE whatsapp_automation_outbox SET status='cancelled', updated_at=NOW() WHERE conversation_id=$1 AND status='queued'",
         [conversation.id],
@@ -289,7 +349,9 @@ export async function drainEnquiryOutbox(send = sendTwilioWhatsAppMessage) {
         if (
           !enabled ||
           conversation.opted_out ||
-          (conversation.bot_paused && job.template_key !== "handoff")
+          (conversation.bot_paused &&
+            !job.template_key.endsWith("handoff") &&
+            !job.template_key.endsWith("no_packages"))
         ) {
           await pool.query(
             "UPDATE whatsapp_automation_outbox SET status='cancelled',updated_at=NOW() WHERE id=$1",
@@ -301,7 +363,7 @@ export async function drainEnquiryOutbox(send = sendTwilioWhatsAppMessage) {
           throw new Error(
             "Customer service window expired. Waiting for the customer to reply; no automatic follow-up sent.",
           );
-        const definition = workflowTemplates.find(
+        const definition = allTemplates.find(
           (t) => t.key === job.template_key,
         )!;
         const template = (
@@ -378,11 +440,11 @@ export async function drainEnquiryOutbox(send = sendTwilioWhatsAppMessage) {
 export async function automationOverview() {
   const { rows } = await pool.query(
     "SELECT name,status,category,is_active,rejection_reason FROM whatsapp_templates WHERE name = ANY($1)",
-    [workflowTemplates.map((t) => t.name)],
+    [allTemplates.map((t) => t.name)],
   );
   return {
     questions: questions.map((q) => ({ key: q.key, label: q.label })),
-    templates: workflowTemplates.map((t) => ({
+    templates: allTemplates.map((t) => ({
       key: t.key,
       name: t.name,
       ...rows.find((r) => r.name === t.name),

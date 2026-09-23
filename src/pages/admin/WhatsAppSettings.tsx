@@ -1,3 +1,4 @@
+import { HotlineKnowledge } from '@/components/whatsapp/HotlineKnowledge';
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -224,6 +225,7 @@ export function WhatsAppSettings() {
         </CardContent>
       </Card>
 
+      <HotlineKnowledge canManage={settings.canManage} />
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Automated travel enquiries</CardTitle>
@@ -243,9 +245,7 @@ export function WhatsAppSettings() {
             Enable enquiry automation (save changes below)
           </label>
           <p className="text-xs text-slate-500">
-            Name → Destination → Travel date → Travellers → Departure city →
-            Budget → Email → Requirements → Confirmation. Customers can send
-            AGENT to request a person, STOP to opt out, or START to begin again.
+            Global workflow: Language → Service → Relevant travel questions → Advisor queue. Office questions use the knowledge above. Customers can ask for an agent in natural French or English, send STOP to opt out, or MENU to start again. Legacy templates remain listed for existing conversations.
           </p>
           <div className="space-y-2">
             {workflow.map((t) => (
@@ -253,7 +253,7 @@ export function WhatsAppSettings() {
                 key={t.key}
                 className="flex flex-wrap items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs"
               >
-                <span className="font-medium">{t.key.replace("_", " ")}</span>
+                <span className="font-medium">{t.key.replaceAll("_", " ")}</span>
                 <span
                   className={
                     t.status === "approved" &&
