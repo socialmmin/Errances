@@ -187,7 +187,7 @@ export async function captureEnquiry(input: {
         input.body.trim(),
       );
     // Do not mistake a second inbound message for the answer to a question not yet sent.
-    const next =
+    let next =
       settings?.automation_enabled &&
       input.body.trim() &&
       (!outstanding || control)
@@ -195,6 +195,20 @@ export async function captureEnquiry(input: {
           ? advanceFrontdesk(state, input.body, knowledge, catalogue)
           : advanceEnquiry(state, input.body)
         : state;
+    // Approval category is provider-controlled. Use a genuine approved question or human handoff, never free text.
+    if (knowledge.enabled && 'templateKey' in next && next.templateKey) {
+      const desiredKey = next.templateKey;
+      const wanted = allTemplates.find(t => t.key === desiredKey);
+      const ready = wanted && (await client.query("SELECT 1 FROM whatsapp_templates WHERE name=$1 AND status='approved' AND lower(category)='utility' AND is_active=TRUE", [wanted.name])).rowCount;
+      if (!ready) {
+        const lang = next.answers.language === 'fr' ? 'fr' : 'en';
+        const greeting = String(next.templateKey).endsWith('_welcome');
+        const fallbackKey = greeting ? 'desk_' + lang + '_name' : 'desk_' + lang + '_handoff';
+        const fallback = allTemplates.find(t => t.key === fallbackKey)!;
+        const allowed = (await client.query("SELECT 1 FROM whatsapp_templates WHERE name=$1 AND status='approved' AND lower(category)='utility' AND is_active=TRUE", [fallback.name])).rowCount;
+        if (allowed) next = { ...next, step: greeting ? 'desk_name' : 'desk_handoff', templateKey: fallbackKey, variables: {}, paused: !greeting, answers: { ...next.answers, ...(greeting ? {} : {quote_status:'agent_required', request:input.body}) } };
+      }
+    }
     const optedOut = stop ? true : restart ? false : conversation.opted_out;
     const answers = next.answers;
     const handoff =
@@ -368,12 +382,12 @@ export async function drainEnquiryOutbox(send = sendTwilioWhatsAppMessage) {
         )!;
         const template = (
           await pool.query(
-            "SELECT * FROM whatsapp_templates WHERE name=$1 AND is_active=TRUE AND lower(category)='utility' AND status='approved' ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM whatsapp_templates WHERE name=$1 ORDER BY created_at DESC LIMIT 1",
             [definition.name],
           )
         ).rows[0];
-        if (!template) {
-          const error = `Waiting for an active, approved Utility template: ${definition.name}`;
+        if (!template || !template.is_active || template.status !== "approved" || template.category?.toLowerCase() !== "utility") {
+          const error = `Utility-only automation blocked ${definition.name}: status=${template?.status || "missing"}, category=${template?.category || "unknown"}. Approval alone is insufficient; category must be Utility.`;
           await pool.query(
             "UPDATE whatsapp_automation_outbox SET status='queued',error=$2,available_at=NOW()+INTERVAL '1 minute',updated_at=NOW() WHERE id=$1",
             [job.id, error],
