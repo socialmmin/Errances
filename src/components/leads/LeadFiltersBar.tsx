@@ -35,12 +35,12 @@ type SavedView = { name: string; smart: SmartFilterKey; source: string; employee
 
 const SAVED_VIEWS_KEY = 'leads_saved_views';
 
-export function useLeadFilters(leads: Lead[], storageKey = 'default') {
+export function useLeadFilters(leads: Lead[], storageKey = 'default', initialEmployeeFilter = 'all') {
     const { staff, user, leadStatuses, followups } = useAppStore();
     const [search, setSearch] = useState('');
     const [smart, setSmart] = useState<SmartFilterKey>('all');
     const [sourceFilter, setSourceFilter] = useState('all');
-    const [employeeFilter, setEmployeeFilter] = useState('all');
+    const [employeeFilter, setEmployeeFilter] = useState(initialEmployeeFilter);
     const [statusFilter, setStatusFilter] = useState('all');
     const [savedViews, setSavedViews] = useState<SavedView[]>([]);
 

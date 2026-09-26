@@ -28,10 +28,11 @@ import { parseCSVContent } from '@/lib/csvParser';
 export function Leads() {
     const { fetchLeads, addLead, updateLead, deleteLead, tours, fetchLeadStatuses, fetchFollowups, fetchStaff } = useAppStore();
     const rawLeads = useFilteredLeads();
-    const { filtered: leads, FilterBar } = useLeadFilters(rawLeads, 'leads');
+    const location = useLocation();
+    const initialEmployeeFilter = (location.state as { filterAssignedStaffId?: string } | null)?.filterAssignedStaffId || 'all';
+    const { filtered: leads, FilterBar } = useLeadFilters(rawLeads, 'leads', initialEmployeeFilter);
     const { t } = useI18n();
     const navigate = useNavigate();
-    const location = useLocation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedLead, setSelectedLead] = useState<Lead | undefined>(undefined);

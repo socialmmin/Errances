@@ -13,6 +13,7 @@ import { TourDetails } from '@/pages/tours/TourDetails';
 import { TourForm } from '@/pages/tours/TourForm';
 import { WhatsApp } from '@/pages/whatsapp/WhatsApp';
 import { Templates } from '@/pages/whatsapp/Templates';
+import { AutomationFlow } from '@/pages/automation/AutomationFlow';
 import { Leads } from '@/pages/leads/Leads';
 import { Contacts } from '@/pages/contacts/Contacts';
 import { LeadDetails } from '@/pages/leads/LeadDetails';
@@ -20,6 +21,7 @@ import { Pipeline } from '@/pages/pipeline/Pipeline';
 import { Analytics } from '@/pages/analytics/Analytics';
 import { Staff } from '@/pages/staff/Staff';
 import { StaffDetails } from '@/pages/staff/StaffDetails';
+import { TravelConsultants } from '@/pages/staff/TravelConsultants';
 import { WhatsAppSettings } from '@/pages/admin/WhatsAppSettings';
 import { Settings } from '@/pages/settings/Settings';
 
@@ -62,7 +64,9 @@ function AppRoutes() {
         <Route path="tours/:id/edit" element={<TourForm />} />
         <Route path="whatsapp" element={<WhatsApp />} />
         <Route path="whatsapp/templates" element={<Templates />} />
+        <Route path="automation" element={<AutomationFlow />} />
         <Route path="analytics" element={<Analytics />} />
+        <Route path="consultants" element={<TravelConsultants />} />
         <Route path="staff" element={
           user?.role === 'admin' ? <Staff /> : <Navigate to="/" replace />
         } />

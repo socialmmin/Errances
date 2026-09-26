@@ -426,6 +426,13 @@ export function getWhatsAppTemplates() {
     return whatsappFetch('/api/whatsapp/templates');
 }
 
+export function getAutomationOverview(): Promise<{
+    questions: Array<{ key: string; label: string }>;
+    templates: Array<{ key: string; name: string; status?: string; category?: string; is_active?: boolean; rejection_reason?: string }>;
+}> {
+    return whatsappFetch('/api/whatsapp/automation');
+}
+
 export function syncWhatsAppTemplates() {
     return whatsappFetch('/api/whatsapp/templates/sync', { method: 'POST' });
 }

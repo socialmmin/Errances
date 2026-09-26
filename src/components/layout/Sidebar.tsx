@@ -16,6 +16,8 @@ import {
     Compass,
     Settings as SettingsIcon,
     LayoutList,
+    Sparkles,
+    UserCog,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -49,7 +51,14 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: { collapsed?: b
             label: 'Engage',
             items: [
                 { label: t('whatsapp'), icon: MessageSquare, href: '/whatsapp' },
+                { label: 'AI Automation', icon: Sparkles, href: '/automation' },
                 { label: 'Templates', icon: LayoutList, href: '/whatsapp/templates' },
+            ],
+        },
+        {
+            label: 'Team',
+            items: [
+                { label: 'Travel Consultants', icon: UserCog, href: '/consultants' },
             ],
         },
         { label: 'Insights', items: [{ label: t('analytics'), icon: BarChart3, href: '/analytics' }] },
