@@ -54,6 +54,33 @@ export function Layout() {
         return () => { supabase.removeChannel(channel); };
     }, []);
 
+    // App-wide realtime for leads: a WhatsApp message from a new contact inserts a lead
+    // server-side (see backend enquiryAutomation.ts). Without this, new WhatsApp leads only
+    // showed up after a full page reload since fetchLeads() above only runs once on mount.
+    useEffect(() => {
+        const channel = supabase
+            .channel('global:leads')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload: any) => {
+                useAppStore.setState((state) => {
+                    if (payload.eventType === 'DELETE') {
+                        return { leads: state.leads.filter((l) => l.id !== payload.old.id) };
+                    }
+                    if (payload.new.notes === '[DELETED]') {
+                        return { leads: state.leads.filter((l) => l.id !== payload.new.id) };
+                    }
+                    const exists = state.leads.some((l) => l.id === payload.new.id);
+                    return {
+                        leads: exists
+                            ? state.leads.map((l) => (l.id === payload.new.id ? payload.new : l))
+                            : [payload.new, ...state.leads],
+                    };
+                });
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+
     const toggleCollapse = () => {
         setCollapsed((prev) => {
             const next = !prev;
