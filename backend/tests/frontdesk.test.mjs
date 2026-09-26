@@ -142,6 +142,49 @@ test("Catalogue flow reads only active real records and empty catalogue routes t
   assert.equal(empty.paused, true);
   assert.match(empty.templateKey, /no_packages$/);
 });
+test("Itinerary request shares the real day-wise plan, inclusions, exclusions and price; missing data never invents content", () => {
+  const packs = [
+    {
+      id: "p1",
+      title: "Sri Lanka Discovery",
+      destination: "Sri Lanka",
+      duration: 8,
+      description: "Guided visits",
+      status: "active",
+      inclusions: ["Hotel", "Breakfast"],
+      exclusions: ["Flights"],
+      price: 1200,
+      day_wise_itinerary: [
+        { day: 1, title: "Arrival", description: "Airport transfer." },
+        { day: 2, title: "Colombo tour", description: "City sightseeing." },
+      ],
+      itinerary_pdf_url: "https://example.com/itinerary.pdf",
+    },
+  ];
+  let s = go(start, "package");
+  s = go(s, "Sri Lanka", packs);
+  s = go(s, "ITINERARY", packs);
+  assert.equal(s.step, "desk_package");
+  assert.match(s.templateKey, /itinerary$/);
+  const body = s.variables["1"];
+  assert.match(body, /DAY 1: Arrival/);
+  assert.match(body, /Airport transfer\./);
+  assert.match(body, /DAY 2: Colombo tour/);
+  assert.match(body, /INCLUSIONS: Hotel, Breakfast/);
+  assert.match(body, /EXCLUSIONS: Flights/);
+  assert.match(body, /PRICE: From EUR 1200/);
+  assert.match(body, /https:\/\/example\.com\/itinerary\.pdf/);
+  // Selecting afterwards still works.
+  s = go(s, "SELECT", packs);
+  assert.equal(s.answers.package_id, "p1");
+  // No day-wise data on file: never fabricate an itinerary.
+  const bare = [{ id: "p2", title: "Bare Package", destination: "Fiji", duration: 5, description: "d", status: "active" }];
+  let b = go(start, "package");
+  b = go(b, "Fiji", bare);
+  b = go(b, "ITINERARY", bare);
+  assert.match(b.variables["1"], /confirmed by an advisor/);
+  assert.doesNotMatch(b.variables["1"], /DAY 1/);
+});
 test("Every reply resolves to a language-specific template; pause never resumes on ordinary messages", () => {
   for (const text of [
     "Bonjour",

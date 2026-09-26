@@ -392,3 +392,29 @@ ALTER TABLE tours ADD COLUMN IF NOT EXISTS category TEXT;
 ALTER TABLE tours ADD COLUMN IF NOT EXISTS duration_note TEXT;
 ALTER TABLE tours ADD COLUMN IF NOT EXISTS price_on_request BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tours_source_url ON tours(source_url);
+
+-- Structured day-wise itinerary (array of {day, title, description}), a downloadable
+-- itinerary PDF, and package highlights — used by both the Package Management UI and
+-- the full itinerary WhatsApp sharing flow. Kept alongside the existing rich-text
+-- `itinerary` column rather than replacing it, so older packages keep their content.
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS day_wise_itinerary JSONB;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS itinerary_pdf_url TEXT;
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS highlights TEXT[];
+
+-- Packages become admin-editable with draft/published states: a draft is never
+-- recommended by the bot (which only ever queries status='active') but stays visible
+-- and editable in the CRM.
+ALTER TABLE tours DROP CONSTRAINT IF EXISTS tours_status_check;
+ALTER TABLE tours ADD CONSTRAINT tours_status_check CHECK (status IN ('active', 'inactive', 'draft'));
+
+-- Package edit history/audit log for the Package Management UI.
+CREATE TABLE IF NOT EXISTS tour_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tour_id UUID NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+    snapshot JSONB NOT NULL,
+    changed_by UUID REFERENCES staffs(id) ON DELETE SET NULL,
+    changed_by_name TEXT,
+    change_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tour_versions_tour_id ON tour_versions(tour_id, created_at DESC);

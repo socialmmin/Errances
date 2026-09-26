@@ -198,6 +198,12 @@ export type WhatsAppSettings = {
     } | null;
 };
 
+export type ItineraryDay = {
+    day: number;
+    title: string;
+    description: string;
+};
+
 export type TourPackage = {
     id: string;
     title: string;
@@ -206,6 +212,9 @@ export type TourPackage = {
     duration: number; // days
     description: string;
     itinerary: any; // Rich text content
+    day_wise_itinerary?: ItineraryDay[] | null;
+    itinerary_pdf_url?: string | null;
+    highlights?: string[];
     departure_city?: string;
     availability?: string;
     accommodation?: string;
@@ -219,7 +228,17 @@ export type TourPackage = {
     inclusions?: string[];
     exclusions?: string[];
     images: string[];
-    status: 'active' | 'inactive';
+    status: 'active' | 'inactive' | 'draft';
+};
+
+export type TourVersion = {
+    id: string;
+    tour_id: string;
+    snapshot: TourPackage;
+    changed_by: string | null;
+    changed_by_name: string | null;
+    change_note: string | null;
+    created_at: string;
 };
 
 export type KPI = {

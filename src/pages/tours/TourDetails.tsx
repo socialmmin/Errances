@@ -6,13 +6,56 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ArrowLeft,
   Clock,
   MapPin,
   Check,
   X,
   Image as ImageIcon,
+  Sparkles,
+  FileText,
+  History,
+  MessageSquare,
 } from "lucide-react";
+import { getTourVersions } from "@/lib/api";
+import type { TourPackage, TourVersion } from "@/types";
+
+/** Mirrors the backend's formatItinerary() in frontdeskFlow.ts so staff can preview exactly
+ * what the WhatsApp bot would send for the ITINERARY request on this package. */
+function formatItineraryPreview(tour: TourPackage) {
+  const durationLine = tour.duration_note
+    ? "Duration: To be confirmed by an advisor"
+    : `Duration: ${tour.duration} days`;
+  const days = tour.day_wise_itinerary?.length
+    ? tour.day_wise_itinerary
+        .slice()
+        .sort((a, b) => a.day - b.day)
+        .map((d) => `DAY ${d.day}${d.title ? `: ${d.title}` : ""}\n${d.description || ""}`.trim())
+        .join("\n\n")
+    : "The detailed day-by-day plan will be confirmed by an advisor.";
+  const inclusions = tour.inclusions?.length ? tour.inclusions.join(", ") : "To be confirmed";
+  const exclusions = tour.exclusions?.length ? tour.exclusions.join(", ") : "To be confirmed";
+  const price = tour.price_on_request || !tour.price ? "Quote on request" : `From EUR ${tour.price}`;
+  let body = [
+    tour.title.toUpperCase(),
+    durationLine,
+    "",
+    days,
+    "",
+    `INCLUSIONS: ${inclusions}`,
+    `EXCLUSIONS: ${exclusions}`,
+    `PRICE: ${price}`,
+  ].join("\n");
+  if (body.length > 950) body = `${body.slice(0, 949)}…`;
+  if (tour.itinerary_pdf_url) body += `\n\nFull PDF: ${tour.itinerary_pdf_url}`;
+  return body;
+}
 
 export function TourDetails() {
   const { id } = useParams();
@@ -20,6 +63,10 @@ export function TourDetails() {
   const { tours, fetchTours } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [imageIndex, setImageIndex] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<TourVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   useEffect(() => {
     let active = true;
     fetchTours().finally(() => {
@@ -30,6 +77,15 @@ export function TourDetails() {
     };
   }, [fetchTours]);
   const tour = tours.find((t) => t.id === id);
+  const openHistory = () => {
+    setHistoryOpen(true);
+    if (!tour) return;
+    setVersionsLoading(true);
+    getTourVersions(tour.id)
+      .then(setVersions)
+      .catch((err) => console.error("Failed to load package history:", err))
+      .finally(() => setVersionsLoading(false));
+  };
   if (!tour)
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
@@ -73,6 +129,12 @@ export function TourDetails() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={openHistory}>
+            <History className="mr-2 h-4 w-4" /> History
+          </Button>
+          <Button variant="outline" onClick={() => setPreviewOpen(true)}>
+            <MessageSquare className="mr-2 h-4 w-4" /> Preview WhatsApp message
+          </Button>
           <Button
             variant="outline"
             onClick={() => navigate(`/tours/${tour.id}/edit`)}
@@ -121,6 +183,16 @@ export function TourDetails() {
               <p className="whitespace-pre-wrap text-slate-600 leading-relaxed">
                 {tour.description}
               </p>
+              {tour.highlights?.length ? (
+                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {tour.highlights.map((h, i) => (
+                    <li key={i} className="flex gap-2 text-sm text-slate-700">
+                      <Sparkles className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+                      <span>{h}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </CardContent>
           </Card>
           <Card>
@@ -142,10 +214,37 @@ export function TourDetails() {
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <h2 className="text-lg font-semibold mb-4">
-                Day-by-day itinerary
-              </h2>
-              {tour.itinerary ? (
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Day-by-day itinerary</h2>
+                {tour.itinerary_pdf_url && (
+                  <a
+                    href={tour.itinerary_pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-sm text-teal-700 underline"
+                  >
+                    <FileText className="h-4 w-4" /> Download PDF
+                  </a>
+                )}
+              </div>
+              {tour.day_wise_itinerary?.length ? (
+                <ol className="space-y-4">
+                  {tour.day_wise_itinerary
+                    .slice()
+                    .sort((a, b) => a.day - b.day)
+                    .map((d) => (
+                      <li key={d.day} className="flex gap-3">
+                        <span className="flex-shrink-0 h-7 min-w-7 px-1.5 rounded-full bg-teal-50 text-teal-700 text-xs font-bold flex items-center justify-center">
+                          {d.day}
+                        </span>
+                        <div>
+                          <p className="font-semibold text-slate-800">{d.title || `Day ${d.day}`}</p>
+                          <p className="text-sm text-slate-600 whitespace-pre-wrap">{d.description}</p>
+                        </div>
+                      </li>
+                    ))}
+                </ol>
+              ) : tour.itinerary ? (
                 <div
                   className="prose prose-slate max-w-none break-words [&_img]:max-w-full"
                   dangerouslySetInnerHTML={{
@@ -224,6 +323,47 @@ export function TourDetails() {
           ))}
         </div>
       </div>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>WhatsApp preview: full itinerary message</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-slate-500 -mt-2">
+            This is exactly what Jennifer sends when a customer replies ITINERARY for this package, built from the data on this page.
+          </p>
+          <pre className="whitespace-pre-wrap text-sm bg-slate-50 border border-slate-200 rounded-lg p-4 max-h-[60vh] overflow-y-auto font-sans">
+            {formatItineraryPreview(tour)}
+          </pre>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Package edit history</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-3">
+            {versionsLoading ? (
+              <p className="text-sm text-slate-500">Loading…</p>
+            ) : versions.length ? (
+              versions.map((v) => (
+                <div key={v.id} className="flex items-start gap-3 text-sm border-b border-slate-100 pb-3 last:border-0">
+                  <History className="h-4 w-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-slate-800">{v.change_note || "Updated"}</p>
+                    <p className="text-slate-500">
+                      {v.changed_by_name || "System"} · {new Date(v.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">No history recorded yet.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

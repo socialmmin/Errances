@@ -26,7 +26,7 @@ export function TourCard({ tour, isAdmin = false, onEdit, onDelete }: TourCardPr
                 <div className="absolute top-3 right-3">
                     <Badge className={cn(
                         "font-black text-[10px] px-3 py-1 rounded-lg uppercase tracking-widest shadow-lg backdrop-blur-md border-none",
-                        tour.status === 'active' ? 'bg-emerald-500/90 text-white' : 'bg-slate-500/90 text-white'
+                        tour.status === 'active' ? 'bg-emerald-500/90 text-white' : tour.status === 'draft' ? 'bg-amber-500/90 text-white' : 'bg-slate-500/90 text-white'
                     )}>
                         {tour.status}
                     </Badge>

@@ -13,6 +13,11 @@ export type CataloguePackage = {
   category?: string;
   description: string;
   inclusions?: string[];
+  exclusions?: string[];
+  price?: number | string | null;
+  price_on_request?: boolean;
+  day_wise_itinerary?: Array<{ day: number; title: string; description: string }> | null;
+  itinerary_pdf_url?: string | null;
   status: string;
 };
 const copy = {
@@ -40,7 +45,8 @@ const copy = {
     search:
       "For your package enquiry, please enter a destination or package name. We will check our published catalogue. Reply AGENT at any time to speak to an advisor.",
     package:
-      "For your enquiry, the matching catalogue package is {{1}}. Destination: {{2}}. Duration: {{3}}. Published details: {{4}}. Reply SELECT to enquire about this package or NEXT for another match. An advisor must confirm availability and prepare your quotation.",
+      "For your enquiry, the matching catalogue package is {{1}}. Destination: {{2}}. Duration: {{3}}. Published details: {{4}}. Reply SELECT to enquire about this package, ITINERARY for the full day-by-day plan, or NEXT for another match. An advisor must confirm availability and prepare your quotation.",
+    itinerary: "{{1}}\n\nReply SELECT to enquire about this package or QUOTE to ask an advisor for a quotation.",
     no_packages:
       "We could not find a published package matching your enquiry in our connected catalogue. Your request has been placed in the advisor queue. Please send your destination and preferred dates; an advisor will help you.",
     office:
@@ -72,7 +78,8 @@ const copy = {
     search:
       "Pour votre demande de circuit, indiquez une destination ou le nom d’un forfait. Nous consulterons notre catalogue publié. Répondez CONSEILLER à tout moment pour parler à notre équipe.",
     package:
-      "Pour votre demande, voici le forfait du catalogue : {{1}}. Destination : {{2}}. Durée : {{3}}. Informations publiées : {{4}}. Répondez CHOISIR pour demander ce forfait ou SUIVANT pour un autre résultat. Un conseiller doit confirmer la disponibilité et préparer votre devis.",
+      "Pour votre demande, voici le forfait du catalogue : {{1}}. Destination : {{2}}. Durée : {{3}}. Informations publiées : {{4}}. Répondez CHOISIR pour demander ce forfait, ITINÉRAIRE pour le programme jour par jour, ou SUIVANT pour un autre résultat. Un conseiller doit confirmer la disponibilité et préparer votre devis.",
+    itinerary: "{{1}}\n\nRépondez CHOISIR pour demander ce forfait ou DEVIS pour demander un devis à un conseiller.",
     no_packages:
       "Aucun forfait publié correspondant à votre demande n’a été trouvé dans notre catalogue connecté. Votre demande a été placée dans la file des conseillers. Envoyez votre destination et vos dates souhaitées ; un conseiller vous aidera.",
     office:
@@ -96,7 +103,11 @@ export const frontdeskTemplates = Object.entries(copy).flatMap(
               "3": "5 days",
               "4": "City walks and hotel accommodation. Details confirmed by an advisor.",
             }
-          : key === "hours"
+          : key === "itinerary"
+            ? {
+                "1": "PARIS DISCOVERY\nDuration: 5 days\n\nDAY 1: Arrival\nAirport transfer and welcome dinner.\n\nDAY 2: City tour\nGuided tour of the Louvre and Eiffel Tower.\n\nINCLUSIONS: Hotel, breakfast, guided tours\nEXCLUSIONS: Flights, travel insurance\nPRICE: From EUR 950",
+              }
+            : key === "hours"
             ? {
                 "1": "Errances Voyages – Paris",
                 "2": "Monday to Saturday",
@@ -131,6 +142,51 @@ export function serviceIntent(input: string) {
   if (/custom|sur mesure/.test(t)) return "custom";
   return "";
 }
+/** Formats a package's actual published day-wise itinerary, inclusions, exclusions and
+ * price into the single-variable text used by the `itinerary` Utility template. Never
+ * invents content: falls back to an advisor referral when the database has no day-wise
+ * breakdown. Kept under ~950 chars to stay inside WhatsApp template variable limits. */
+export function formatItinerary(pack: CataloguePackage, lang: "en" | "fr"): string {
+  const fr = lang === "fr";
+  const durationLine = pack.duration_note
+    ? fr
+      ? "Durée : à confirmer par un conseiller"
+      : "Duration: To be confirmed by an advisor"
+    : `${fr ? "Durée" : "Duration"}: ${pack.duration} ${fr ? "jours" : "days"}`;
+  const days =
+    pack.day_wise_itinerary && pack.day_wise_itinerary.length > 0
+      ? pack.day_wise_itinerary
+          .slice()
+          .sort((a, b) => a.day - b.day)
+          .map((d) => `${fr ? "JOUR" : "DAY"} ${d.day}${d.title ? `: ${d.title}` : ""}\n${d.description || ""}`.trim())
+          .join("\n\n")
+      : fr
+        ? "Le programme détaillé jour par jour sera confirmé par un conseiller."
+        : "The detailed day-by-day plan will be confirmed by an advisor.";
+  const inclusions = pack.inclusions?.length ? pack.inclusions.join(", ") : fr ? "À confirmer" : "To be confirmed";
+  const exclusions = pack.exclusions?.length ? pack.exclusions.join(", ") : fr ? "À confirmer" : "To be confirmed";
+  const price =
+    pack.price_on_request || !pack.price
+      ? fr
+        ? "Sur devis"
+        : "Quote on request"
+      : `${fr ? "À partir de" : "From"} EUR ${pack.price}`;
+  let body = [
+    pack.title.toUpperCase(),
+    durationLine,
+    "",
+    days,
+    "",
+    `${fr ? "INCLUS" : "INCLUSIONS"}: ${inclusions}`,
+    `${fr ? "NON INCLUS" : "EXCLUSIONS"}: ${exclusions}`,
+    `${fr ? "PRIX" : "PRICE"}: ${price}`,
+  ].join("\n");
+  const MAX = 950;
+  if (body.length > MAX) body = `${body.slice(0, MAX - 1)}…`;
+  if (pack.itinerary_pdf_url) body += `\n\n${fr ? "PDF complet" : "Full PDF"}: ${pack.itinerary_pdf_url}`;
+  return body;
+}
+const itineraryRequest = /^(itinerary|itineraire|itinéraire|send itinerary|full itinerary|day.?wise|jour par jour|programme)$/i;
 export function deskControl(input: string) {
   return (
     needsAgent(input) ||
@@ -253,6 +309,26 @@ export function advanceFrontdesk(
     !state.step.startsWith("desk_")
   )
     return reply("welcome", "desk_service");
+  if (state.step === "desk_package" && itineraryRequest.test(t)) {
+    const pack = packages.find(
+      (p) => p.id === answers.package_offer_id && p.status === "active",
+    );
+    if (!pack) return handoff("no_packages");
+    return reply("itinerary", "desk_package", {
+      variables: { "1": formatItinerary(pack, lang) },
+    });
+  }
+  if (state.step === "desk_package" && /^(quote|devis)$/.test(t)) {
+    const pack = packages.find(
+      (p) => p.id === answers.package_offer_id && p.status === "active",
+    );
+    if (pack) {
+      answers.package_id = pack.id;
+      answers.package_title = pack.title;
+      answers.destination = pack.destination;
+    }
+    return reply("name", "desk_name");
+  }
   if (state.step === "desk_search" || state.step === "desk_package") {
     const query =
       state.step === "desk_search" ? text : answers.package_search || "";

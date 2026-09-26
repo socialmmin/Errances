@@ -164,7 +164,7 @@ export async function captureEnquiry(input: {
     const catalogue = knowledge.enabled
       ? (
           await client.query(
-            "SELECT id,title,destination,duration,duration_note,category,description,inclusions,status FROM tours WHERE status='active' ORDER BY title",
+            "SELECT id,title,destination,duration,duration_note,category,description,inclusions,exclusions,price,price_on_request,day_wise_itinerary,itinerary_pdf_url,status FROM tours WHERE status='active' ORDER BY title",
           )
         ).rows
       : [];

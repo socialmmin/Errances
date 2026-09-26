@@ -1,5 +1,5 @@
 import { supabase, anonClient, API_BASE, getAuthToken } from './supabase';
-import type { Lead, TourPackage } from '@/types';
+import type { Lead, TourPackage, TourVersion } from '@/types';
 
 // --- LEADS ---
 
@@ -219,6 +219,17 @@ export async function deleteTour(id: string) {
         .eq('id', id);
 
     if (error) throw error;
+}
+
+export async function getTourVersions(tourId: string) {
+    const { data, error } = await supabase
+        .from('tour_versions')
+        .select('*')
+        .eq('tour_id', tourId)
+        .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data as TourVersion[];
 }
 
 // --- STAFF ---

@@ -32,10 +32,17 @@ const TABLES: Record<string, TableConfig> = {
         canDelete: authed,
     },
     tours: {
-        columns: ['id', 'title', 'destination', 'price', 'duration', 'description', 'itinerary', 'source_url', 'category', 'duration_note', 'price_on_request', 'departure_city', 'availability', 'accommodation', 'meals', 'transport', 'cancellation_policy', 'inclusions', 'exclusions', 'images', 'status', 'created_at'],
+        columns: ['id', 'title', 'destination', 'price', 'duration', 'description', 'itinerary', 'day_wise_itinerary', 'itinerary_pdf_url', 'highlights', 'source_url', 'category', 'duration_note', 'price_on_request', 'departure_city', 'availability', 'accommodation', 'meals', 'transport', 'cancellation_policy', 'inclusions', 'exclusions', 'images', 'status', 'created_at'],
         canRead: authed,
         canWrite: authed,
         canDelete: authed,
+    },
+    tour_versions: {
+        columns: ['id', 'tour_id', 'snapshot', 'changed_by', 'changed_by_name', 'change_note', 'created_at'],
+        // Written only by the afterTourWrite hook below, so the history can't be edited after the fact.
+        canRead: authed,
+        canWrite: () => false,
+        canDelete: () => false,
     },
     staffs: {
         columns: ['id', 'email', 'access_key', 'full_name', 'role', 'avatar_url', 'department', 'phone', 'status', 'created_at'],
@@ -125,8 +132,9 @@ const TABLES: Record<string, TableConfig> = {
 };
 
 const jsonColumns: Record<string, string[]> = {
-    tours: ['itinerary'], leads: ['enquiry_data'], whatsapp_conversations: ['automation_data'],
+    tours: ['itinerary', 'day_wise_itinerary'], leads: ['enquiry_data'], whatsapp_conversations: ['automation_data'],
     whatsapp_templates: ['variables', 'buttons', 'sample_values'], lead_activities: ['metadata'], user_activity: ['metadata'],
+    tour_versions: ['snapshot'],
 };
 function databaseValue(table: string, column: string, value: any) {
     return value != null && jsonColumns[table]?.includes(column) ? JSON.stringify(value) : value;
@@ -251,6 +259,20 @@ async function afterLeadWrite(req: Request, eventType: 'INSERT' | 'UPDATE', newR
     }
 }
 
+/** Snapshots a tour package after every create/edit for the Package Management audit log. */
+async function afterTourWrite(req: Request, eventType: 'INSERT' | 'UPDATE', newRow: any) {
+    try {
+        const actorName = await getActorName(req);
+        await pool.query(
+            `INSERT INTO tour_versions (tour_id, snapshot, changed_by, changed_by_name, change_note)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [newRow.id, JSON.stringify(newRow), req.user?.sub ?? null, actorName, eventType === 'INSERT' ? 'Package created' : 'Package updated']
+        );
+    } catch (err) {
+        console.error('[db] tour version snapshot failed:', err);
+    }
+}
+
 // --- SELECT ---
 router.get('/:table', requireAuth, async (req, res) => {
     const table = getTable(req, res);
@@ -309,6 +331,8 @@ router.post('/:table', requireAuth, async (req, res) => {
 
             if (req.params.table === 'leads') {
                 await afterLeadWrite(req, 'INSERT', result.rows[0], null);
+            } else if (req.params.table === 'tours') {
+                await afterTourWrite(req, 'INSERT', result.rows[0]);
             } else if (req.params.table === 'whatsapp_messages' && result.rows[0].lead_id) {
                 const msg = result.rows[0];
                 const label = msg.sender === 'user' ? 'WhatsApp message sent' : 'WhatsApp message received';
@@ -359,6 +383,8 @@ router.patch('/:table', requireAuth, async (req, res) => {
             broadcastChange(req.params.table, 'UPDATE', { new: row });
             if (req.params.table === 'leads') {
                 await afterLeadWrite(req, 'UPDATE', row, oldRowsById[row.id] ?? null);
+            } else if (req.params.table === 'tours') {
+                await afterTourWrite(req, 'UPDATE', row);
             }
         }
 
