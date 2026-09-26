@@ -46,7 +46,8 @@ const copy = {
       "For your package enquiry, please enter a destination or package name. We will check our published catalogue. Reply AGENT at any time to speak to an advisor.",
     package:
       "For your enquiry, the matching catalogue package is {{1}}. Destination: {{2}}. Duration: {{3}}. Published details: {{4}}. Reply SELECT to enquire about this package, ITINERARY for the full day-by-day plan, or NEXT for another match. An advisor must confirm availability and prepare your quotation.",
-    itinerary: "{{1}}\n\nReply SELECT to enquire about this package or QUOTE to ask an advisor for a quotation.",
+    itinerary:
+      "Here is the full itinerary you requested:\n\n{{1}}\n\nReply SELECT to enquire about this package or QUOTE to ask an advisor for a quotation.",
     no_packages:
       "We could not find a published package matching your enquiry in our connected catalogue. Your request has been placed in the advisor queue. Please send your destination and preferred dates; an advisor will help you.",
     office:
@@ -79,7 +80,8 @@ const copy = {
       "Pour votre demande de circuit, indiquez une destination ou le nom d’un forfait. Nous consulterons notre catalogue publié. Répondez CONSEILLER à tout moment pour parler à notre équipe.",
     package:
       "Pour votre demande, voici le forfait du catalogue : {{1}}. Destination : {{2}}. Durée : {{3}}. Informations publiées : {{4}}. Répondez CHOISIR pour demander ce forfait, ITINÉRAIRE pour le programme jour par jour, ou SUIVANT pour un autre résultat. Un conseiller doit confirmer la disponibilité et préparer votre devis.",
-    itinerary: "{{1}}\n\nRépondez CHOISIR pour demander ce forfait ou DEVIS pour demander un devis à un conseiller.",
+    itinerary:
+      "Voici l’itinéraire complet demandé :\n\n{{1}}\n\nRépondez CHOISIR pour demander ce forfait ou DEVIS pour demander un devis à un conseiller.",
     no_packages:
       "Aucun forfait publié correspondant à votre demande n’a été trouvé dans notre catalogue connecté. Votre demande a été placée dans la file des conseillers. Envoyez votre destination et vos dates souhaitées ; un conseiller vous aidera.",
     office:
@@ -88,11 +90,15 @@ const copy = {
       "Informations pour votre demande : {{1}}. Jours habituels : {{2}}. Horaires : {{3}}, heure locale ({{4}}). Fermé les jours fériés applicables. Vérification des horaires : {{5}}. Répondez CONSEILLER pour contacter notre équipe ou MENU pour une autre demande.",
   },
 };
+// Bumped when a template body changes after its _v1 was already submitted to Meta: a
+// rejected/approved Content resource is immutable, so a corrected body needs a new name
+// to be picked up as a fresh template rather than silently reusing the burned one.
+const templateVersion: Record<string, number> = { itinerary: 2 };
 export const frontdeskTemplates = Object.entries(copy).flatMap(
   ([language, messages]) =>
     Object.entries(messages).map(([key, body]) => ({
       key: `desk_${language}_${key}`,
-      name: `ev_desk_${language}_${key}_v1`,
+      name: `ev_desk_${language}_${key}_v${templateVersion[key] || 1}`,
       body,
       language,
       samples:
