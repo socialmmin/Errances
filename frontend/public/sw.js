@@ -12,8 +12,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/icon-512.jpg',
-      badge: '/icon-512.jpg',
+      icon: '/brand/notification-icon.png',
+      badge: '/brand/notification-badge.png',
       data: { url: data.url || '/leads' },
       tag: `${data.url || '/leads'}-${Date.now()}`,
       renotify: true,
