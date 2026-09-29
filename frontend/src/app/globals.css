@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Premium red + white theme. The app is light-only. */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 220 39% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 39% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 40%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 356 75% 49%;
+}
+
+.dark {
+  --background: 0 0% 100%;
+  --foreground: 220 39% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 39% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 40%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 356 75% 49%;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+html {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+
+/* Horizontal scrollbars that follow the app theme */
+.theme-scroll { scrollbar-width: thin; scrollbar-color: #d91e2a transparent; }
+.theme-scroll::-webkit-scrollbar { height: 10px; }
+.theme-scroll::-webkit-scrollbar-track { background: hsl(var(--muted, 220 14% 96%)); border-radius: 9999px; }
+.theme-scroll::-webkit-scrollbar-thumb { background: #d91e2a; border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+.theme-scroll::-webkit-scrollbar-thumb:hover { background: #b91c1c; background-clip: padding-box; }
+
+/* Hero banners (written as navy gradients in the markup) render as the brand red gradient with white text. */
+[class*="from-navy"] { background-image: linear-gradient(135deg, #b91c1c 0%, #d91e2a 55%, #991b1b 100%) !important; }
+[class*="from-navy"] [class*="text-gold"]:not([class*="bg-white"]),
+[class*="from-navy"][class*="text-gold"] { color: #ffffff !important; }
+[class*="from-navy"] [class*="text-slate-"]:not([class*="bg-white"]) { color: rgba(255, 255, 255, 0.88) !important; }
+[class*="from-navy"] .bg-gold { background-color: #ffffff !important; color: #b91c1c !important; }
+[class*="from-navy"] [class*="border-gold"] { border-color: rgba(255, 255, 255, 0.35) !important; }
+
+/* Red text on charcoal surfaces (avatars, chips, chat headers) uses a lighter red so it stays readable. */
+.bg-navy.text-gold, .bg-navy .text-gold, .bg-navy-700.text-gold, .bg-navy-800.text-gold, .bg-navy-800 .text-gold,
+.bg-navy-900.text-gold, .bg-navy-900 .text-gold, .bg-navy-950.text-gold, .bg-navy-950 .text-gold,
+.bg-navy .text-gold-400, .bg-navy-900 .text-gold-400, .bg-navy-950 .text-gold-400 { color: #fca5a5; }
+
+/* Long translated strings must wrap inside grid cells instead of widening the page. */
+.grid > * { min-width: 0; }

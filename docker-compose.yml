@@ -1,41 +1,68 @@
+# ErranceVoyages_Tourism_2026 — local development compose file.
+# Coolify deploys frontend/backend as separate Docker services from their
+# own Dockerfiles in production; this compose file is for local dev only
+# (spins up Postgres + backend + frontend together).
+
+version: '3.9'
+
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: errance-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: errances
+      POSTGRES_USER: errance_app
+      POSTGRES_PASSWORD: dev_only_change_me
+      POSTGRES_DB: errance
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - errance_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U errance_app -d errance']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: errance-backend
     restart: unless-stopped
     depends_on:
-      - postgres
-    env_file:
-      - ./backend/.env
+      postgres:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/errances
+      PORT: 4000
+      ALLOWED_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgres://errance_app:dev_only_change_me@postgres:5432/errance
+      JWT_ACCESS_SECRET: dev_access_secret_change_me
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_me
+      JWT_REFRESH_EXPIRES_IN: 7d
+      R2_ENDPOINT: ''
+      R2_ACCESS_KEY_ID: ''
+      R2_SECRET_ACCESS_KEY: ''
+      R2_BUCKET: ''
     ports:
-      - "4000:4000"
-    volumes:
-      - baileys_auth:/app/auth_info_baileys
+      - '4000:4000'
 
   frontend:
     build:
-      context: .
+      context: ./frontend
       args:
-        VITE_API_URL: http://localhost:4000
+        NEXT_PUBLIC_API_URL: http://localhost:4000/api
+    container_name: errance-frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "8080:80"
+      - '3000:3000'
 
 volumes:
-  postgres_data:
-  baileys_auth:
+  errance_pgdata:
+    # Local dev volume only. Production backups are pg_dump-based against
+    # the Coolify-managed Postgres instance — see ARCHITECTURE.md, backup
+    # path convention: r2://errance-backups/ErranceVoyages_Tourism_2026/postgres/
+    name: errancevoyages_tourism_2026_pgdata

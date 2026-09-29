@@ -1,0 +1,1 @@
+UPDATE itinerary_presets SET value = replace(replace(value, ' Tap below to talk to our expert.', ''), ' Talk to our expert to customise it.', ' Our expert can customise it for you.') WHERE kind='message';

@@ -1,46 +1,28 @@
-# Logs
-logs
+# ErranceVoyages_Tourism_2026 — root .gitignore
+
+node_modules/
+dist/
+build/
+.next/
+out/
+
+.env
+.env.local
+.env.*.local
+!*.env.example
+
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
 
-# Environment & Credentials
-.env
-.env.*
-!.env.example
+.vscode/
+.idea/
 
-# Backend
-backend/node_modules
-backend/dist
-auth_info_baileys/
-backend/auth_info_baileys/
+# local-only Postgres data dir used for native (non-Docker) dev
+.pgdata/
 
-# Temporary & Local files
-scratch/
-delete-leads-direct.js
-get-messaging-services.js
-get-recent-messages.js
-get-webhook-config.js
-get-whatsapp-senders.js
-test-incoming-webhook.js
-test_all_queries.js
-test_staff_rls.js
+coverage/
+*.tsbuildinfo
+backend.log
+frontend.log
