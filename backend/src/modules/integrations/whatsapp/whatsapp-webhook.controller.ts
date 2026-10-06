@@ -161,6 +161,19 @@ return this.bot.sendAgentMessage(dto.leadId, dto.text, req.user?.userId, dto.rep
     return this.bot.packageDocumentUrl(id);
   }
 
+  // Pulls customer messages Twilio received but could not hand to the CRM, into the Inbox (no auto-replies).
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('twilio/recover')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('whatsapp')
+  @RequirePermissions(PERMISSIONS.LEADS_EDIT)
+  async recoverTwilio(@Body() dto: { since?: string }, @Req() req: any) {
+    if (!seesAllLeads(req.user)) throw new ForbiddenException('Only a super admin can recover WhatsApp messages');
+    const result = await this.bot.recoverTwilioInbound(dto?.since || '');
+    this.audit.log({ userId: req.user?.userId, branchId: req.user?.branchId, action: 'whatsapp.twilio_recover', resourceType: 'whatsapp', result: 'success', detail: result as any });
+    return result;
+  }
+
   @Get('billing-summary')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireAccess('dashboard.wa_billing')

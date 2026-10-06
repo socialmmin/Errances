@@ -16,6 +16,7 @@ import { CreateLeadDto } from '../../leads/dto/create-lead.dto';
 import { RealtimeGateway } from '../../../common/realtime/realtime.gateway';
 import { PackagesService } from '../../packages/packages.service';
 import { PushService } from '../../../common/push/push.service';
+import { TwilioWhatsAppService } from './twilio-whatsapp.service';
 
 interface WhatsAppReferral {
   source_url?: string;
@@ -205,6 +206,8 @@ interface WhatsAppConfig {
   phone_number_id: string;
   business_account_id: string;
   access_token: string;
+  // 'twilio' when WhatsApp goes through Twilio (TWILIO_* settings); otherwise Meta's Cloud API.
+  provider?: 'meta' | 'twilio';
 }
 
 @Injectable()
@@ -219,6 +222,7 @@ export class WhatsAppBotService implements OnModuleInit {
     private realtime: RealtimeGateway,
     private packagesService: PackagesService,
     private push: PushService,
+    private twilio: TwilioWhatsAppService,
   ) {}
 
   // Safety net for the other failure mode: a lead that never even got an attempt
@@ -558,15 +562,26 @@ export class WhatsAppBotService implements OnModuleInit {
     const config = await this.getConfig();
     if (!config) return out;
     out.configured = true;
+    const twilio = config.provider === 'twilio';
+    if (twilio) {
+      // Twilio signs its webhooks with the auth token, so a working token is also the "secret";
+      // "subscribed" means the sender is online and its webhook points at this CRM.
+      const h = await this.twilio.health();
+      Object.assign(out, {
+        provider: 'twilio', sender: this.twilio.from.replace('whatsapp:', ''), senderName: h.senderName, senderStatus: h.senderStatus,
+        tokenValid: h.tokenValid, appId: 'twilio', appName: h.accountName ? `Twilio - ${h.accountName}` : 'Twilio',
+        secretValid: h.tokenValid, secretSource: 'server', subscribed: h.webhookOk && h.senderStatus === 'ONLINE',
+      });
+    }
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    try {
+    if (!twilio) try {
       const res = await fetch(`https://graph.facebook.com/${version}/debug_token?input_token=${encodeURIComponent(config.access_token)}&access_token=${encodeURIComponent(config.access_token)}`);
       const data: any = await res.json();
       out.tokenValid = !!data?.data?.is_valid;
       out.appId = data?.data?.app_id ?? null;
       out.appName = data?.data?.application ?? null;
     } catch { /* leave defaults */ }
-    if (out.appId) {
+    if (out.appId && !twilio) {
       if (Date.now() - this.secretVerifyCache.at < 5 * 60000) {
         out.secretValid = this.secretVerifyCache.valid;
         out.secretSource = this.secretVerifyCache.source;
@@ -619,6 +634,12 @@ export class WhatsAppBotService implements OnModuleInit {
     // always about sending pace, not account quality.
     out.qualityRating = null;
     out.throughputTier = null;
+    if (twilio) {
+      const h = await this.twilio.health();
+      out.qualityRating = h.quality;
+      out.throughputTier = h.throughput;
+      return out;
+    }
     try {
       const res = await fetch(`https://graph.facebook.com/${version}/${config.phone_number_id}?fields=quality_rating,throughput&access_token=${encodeURIComponent(config.access_token)}`);
       const data: any = await res.json();
@@ -643,6 +664,51 @@ export class WhatsAppBotService implements OnModuleInit {
     this.appSecretCache = { secrets: [], at: 0 };
     this.secretVerifyCache = { valid: true, source: 'crm', at: Date.now() };
     return this.connectionHealth();
+  }
+
+  // Twilio inbound (form fields) -> the same processing as a Cloud API webhook. A message id we
+  // already stored is skipped, so a repeated webhook never doubles a message or a reply.
+  // Message SIDs being handled right now: a Twilio retry can arrive before the first delivery is stored.
+  private twilioInFlight = new Set<string>();
+
+  async processTwilioInbound(params: Record<string, string>): Promise<void> {
+    const sid = params?.MessageSid;
+    if (sid) {
+      if (this.twilioInFlight.has(sid)) return;
+      this.twilioInFlight.add(sid);
+    }
+    try {
+      if (sid) {
+        const { rows } = await this.pool.query(`SELECT 1 FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1`, [sid]);
+        if (rows.length) return;
+      }
+      await this.processWebhookPayload(this.twilio.toCloudInbound(params));
+    } finally {
+      if (sid) this.twilioInFlight.delete(sid);
+    }
+  }
+
+  async processTwilioStatus(params: Record<string, string>): Promise<void> {
+    const payload = this.twilio.toCloudStatus(params);
+    if (payload) await this.processWebhookPayload(payload);
+  }
+
+  // Customer messages Twilio received while the CRM could not take them (e.g. its webhook address
+  // was missing): stored and notified now, with no automatic reply. Safe to run more than once.
+  async recoverTwilioInbound(since: string) {
+    if (!this.twilio.isConfigured()) throw new BadRequestException('Twilio is not configured');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(since || '')) ? since : new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const found = await this.twilio.listInboundSince(day);
+    let recovered = 0;
+    for (const m of found) {
+      const { rows } = await this.pool.query(`SELECT 1 FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1`, [m.sid]);
+      if (rows.length) continue;
+      const params: Record<string, string> = { MessageSid: m.sid, From: m.from, WaId: m.from.replace(/\D/g, ''), Body: m.body, NumMedia: String(m.media.length) };
+      if (m.media[0]) { params.MediaUrl0 = m.media[0].url; params.MediaContentType0 = m.media[0].contentType; }
+      await this.processWebhookPayload(this.twilio.toCloudInbound(params, { recovered: true, timestamp: Math.floor(new Date(m.dateSent).getTime() / 1000) }));
+      recovered++;
+    }
+    return { since: day, checked: found.length, recovered };
   }
 
   async processWebhookPayload(body: any): Promise<void> {
@@ -1152,6 +1218,22 @@ export class WhatsAppBotService implements OnModuleInit {
     if (!['image', 'document', 'audio', 'video', 'sticker'].includes(type)) return null;
     const media = message[type];
     if (!media?.id) return null;
+    if (this.twilio.isTwilioMediaUrl(media.id)) {
+      const mimeType = String(media.mime_type || 'application/octet-stream');
+      const ext = mimeType.split('/')[1]?.split(';')[0] || 'bin';
+      const filename = String(media.filename || `${type}.${ext}`);
+      const kind = type === 'sticker' ? 'image' : (type as 'image' | 'document' | 'audio' | 'video');
+      // With file storage configured keep our own copy; otherwise the file stays at Twilio and the
+      // inbox streams it from there (see messageMedia).
+      if (this.r2.isConfigured()) {
+        const file = await this.twilio.fetchMedia(media.id);
+        if (file) {
+          const { url } = await this.r2.uploadBuffer(file.body, 'whatsapp-inbound', filename, mimeType);
+          return { kind, url, filename, mimeType, caption: media.caption };
+        }
+      }
+      return { kind, url: media.id, filename, mimeType, caption: media.caption };
+    }
     const config = await this.getConfig();
     if (!config || !this.r2.isConfigured()) return null;
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
@@ -1200,6 +1282,10 @@ export class WhatsAppBotService implements OnModuleInit {
       await this.storeMessage(from, leadId ?? null, 'in', inboundText, message?.type || 'text', message?.id, undefined, { ...(replyTo ? { replyTo } : {}), ...(lateMin >= 5 ? { lateMin } : {}) }).catch(() => undefined);
     }
     this.notifyInbound(from, leadId, contactName, inboundText).catch(() => undefined);
+
+    // Recovered from Twilio's log after it could not reach the CRM: kept in the Inbox and notified
+    // above, but never auto-answered hours later -- a person picks it up.
+    if (message?.recovered) return;
 
     // Meta retries undelivered webhooks for days. A tap or message redelivered long after the
     // customer sent it (e.g. after an outage) is kept in the Inbox and notified to staff above, but
@@ -2411,6 +2497,8 @@ export class WhatsAppBotService implements OnModuleInit {
   }
 
   private async getConfig(): Promise<WhatsAppConfig | null> {
+    // Twilio takes over WhatsApp whenever its settings are present.
+    if (this.twilio.isConfigured()) return { provider: 'twilio', phone_number_id: 'twilio', business_account_id: 'twilio', access_token: '' };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config
        WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`,
@@ -2426,6 +2514,7 @@ export class WhatsAppBotService implements OnModuleInit {
   }
 
   private async callWhatsAppApi(config: WhatsAppConfig, payload: Record<string, unknown>) {
+    if (config.provider === 'twilio') return this.twilio.send(payload);
     const res = await fetch(this.graphUrl(config), {
       method: 'POST',
       headers: {
@@ -2581,6 +2670,10 @@ export class WhatsAppBotService implements OnModuleInit {
     if (!key && url) {
       const m = url.match(/\/((?:whatsapp-inbound|whatsapp-attachments|uploads|packages)\/[^?#]+)/);
       key = m ? decodeURIComponent(m[1]) : null;
+    }
+    if (!key && this.twilio.isTwilioMediaUrl(url)) {
+      const file = await this.twilio.fetchMedia(url);
+      return file ? { leadId: rows[0].lead_id, body: file.body, contentType: meta.mimeType || file.contentType } : null;
     }
     if (!key) return null;
     const obj = await this.r2.getObject(key);
@@ -3206,6 +3299,10 @@ export class WhatsAppBotService implements OnModuleInit {
     const fallback = { name: 'Errances Voyages', phone: null as string | null, pictureUrl: null as string | null };
     const config = await this.getConfig();
     if (!config) return fallback;
+    if (config.provider === 'twilio') {
+      const h = await this.twilio.health().catch(() => null);
+      return { name: h?.senderName || fallback.name, phone: this.twilio.from.replace('whatsapp:', ''), pictureUrl: null };
+    }
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
     const base = `https://graph.facebook.com/${version}/${config.phone_number_id}`;
     const token = encodeURIComponent(config.access_token);
