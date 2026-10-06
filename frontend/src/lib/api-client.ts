@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/store/auth-store';
 import { saveReturnPath } from '@/lib/return-path';
+import { getLang } from '@/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
@@ -37,6 +38,7 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'Accept-Language': getLang(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },

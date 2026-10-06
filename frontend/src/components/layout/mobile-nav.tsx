@@ -11,6 +11,7 @@ import { useCallbackRequests } from '@/hooks/use-callback-requests';
 import { useFailedItineraries } from '@/hooks/use-whatsapp';
 import { NAV_ITEMS } from './sidebar';
 import { useMyAccess } from '@/hooks/use-access';
+import { tr } from '@/i18n';
 
 const BAR = [
   { href: '/dashboard', access: 'dashboard', label: 'Home', icon: LayoutDashboard },
@@ -42,7 +43,7 @@ export function MobileNav() {
       {open && (
         <div className="fixed inset-0 z-[210] bg-black/50" onClick={() => setOpen(false)}>
           <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col overflow-y-auto bg-navy-950 p-4 pb-24 text-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between"><p className="text-sm font-bold uppercase tracking-widest text-gold">Menu</p><button type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="rounded-lg p-2 hover:bg-white/10"><X className="h-5 w-5" /></button></div>
+            <div className="mb-3 flex items-center justify-between"><p className="text-sm font-bold uppercase tracking-widest text-gold">{tr('Menu')}</p><button type="button" aria-label={tr('Close menu')} onClick={() => setOpen(false)} className="rounded-lg p-2 hover:bg-white/10"><X className="h-5 w-5" /></button></div>
             <div className="flex flex-col gap-1.5">
               {[...NAV_ITEMS.filter((item) => can(item.access)), ...(isSuperAdmin ? [{ href: '/settings', label: 'Settings', icon: Settings }] : [])].map((item) => {
                 const Icon = item.icon;
@@ -50,13 +51,13 @@ export function MobileNav() {
                 const n = badge(item.href);
                 return (
                   <Link key={item.href} href={item.href} className={cn('relative flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium', active ? 'bg-gold text-navy' : 'bg-white/5 text-slate-200 hover:bg-white/10')}>
-                    <Icon className="h-5 w-5 shrink-0" /><span className="truncate">{item.label}</span>
+                    <Icon className="h-5 w-5 shrink-0" /><span className="truncate">{tr(item.label)}</span>
                     {n > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{n}</span>}
                   </Link>
                 );
               })}
             </div>
-            <button type="button" onClick={clearSession} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-white/5 py-3 text-sm font-medium text-slate-300 hover:bg-white/10"><LogOut className="h-4 w-4" />Log out</button>
+            <button type="button" onClick={clearSession} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-white/5 py-3 text-sm font-medium text-slate-300 hover:bg-white/10"><LogOut className="h-4 w-4" />{tr('Log out')}</button>
           </div>
         </div>
       )}
@@ -68,11 +69,11 @@ export function MobileNav() {
           return (
             <Link key={item.href} href={item.href} className={cn('relative flex flex-col items-center justify-center gap-1 text-[11px] font-medium', active ? 'text-gold' : 'text-muted-foreground')}>
               <span className="relative"><Icon className="h-5 w-5" />{n > 0 && <span className="absolute -right-2.5 -top-1.5 rounded-full bg-red-500 px-1 text-[9px] font-bold leading-4 text-white">{n > 99 ? '99+' : n}</span>}</span>
-              {item.label}
+              {tr(item.label)}
             </Link>
           );
         })}
-        <button type="button" onClick={() => setOpen((v) => !v)} className={cn('flex flex-col items-center justify-center gap-1 text-[11px] font-medium', open ? 'text-gold' : 'text-muted-foreground')}><MoreHorizontal className="h-5 w-5" />More</button>
+        <button type="button" onClick={() => setOpen((v) => !v)} className={cn('flex flex-col items-center justify-center gap-1 text-[11px] font-medium', open ? 'text-gold' : 'text-muted-foreground')}><MoreHorizontal className="h-5 w-5" />{tr('More')}</button>
       </nav>
     </div>,
     document.body,

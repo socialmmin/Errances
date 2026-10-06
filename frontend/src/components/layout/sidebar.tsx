@@ -36,6 +36,7 @@ import { useWhatsAppHealth } from '@/hooks/use-whatsapp';
 import { useFailedItineraries, useInboxState } from '@/hooks/use-whatsapp';
 import { useCampaignCoverage } from '@/hooks/use-packages';
 import { useMyAccess } from '@/hooks/use-access';
+import { tr } from '@/i18n';
 
 export const NAV_ITEMS = [
   { href: '/dashboard', access: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -136,10 +137,10 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
         </div>
         <div className={cn('leading-tight', collapsed && 'hidden')}>
           <div className="max-w-36 truncate text-sm font-bold tracking-tight text-white">{brand.company_name}</div>
-          <div className="max-w-36 truncate text-[10px] uppercase tracking-widest text-slate-500">{brand.tagline}</div>
+          <div className="max-w-36 truncate text-[10px] uppercase tracking-widest text-slate-500">{tr(brand.tagline)}</div>
         </div>
         </div>
-        <button type="button" onClick={onToggle} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-gold" title={collapsed ? 'Show sidebar' : 'Hide sidebar'}>{collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button>
+        <button type="button" onClick={onToggle} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-gold" title={collapsed ? tr('Show sidebar') : tr('Hide sidebar')}>{collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button>
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 py-4 [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
@@ -164,7 +165,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                     active ? 'text-navy' : 'text-slate-500 group-hover:text-slate-300',
                   )}
                 />
-                {!collapsed && <span className="truncate">{item.label}</span>}
+                {!collapsed && <span className="truncate">{tr(item.label)}</span>}
                 {item.href === '/leads' && <CountBadge hideZero={collapsed} n={newLeads} tone="red" />}
                 {item.href === '/whatsapp' && <CountBadge hideZero={collapsed} n={unreadMessages} tone="red" />}
                 {item.href === '/packages' && <CountBadge hideZero={collapsed} n={coverageGaps} tone="red" />}
@@ -180,7 +181,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                   draggable
                   onDragStart={() => setDragHref(item.href)}
                   onDragEnd={() => { setDragHref(null); setNavItems((items) => { persistOrder(items); return items; }); }}
-                  title="Drag to reorder"
+                  title={tr('Drag to reorder')}
                   className={cn('mr-1 shrink-0 cursor-grab touch-none rounded p-1 text-slate-500 opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100', active && 'text-navy/60 hover:text-navy')}
                 >
                   <GripVertical className="h-4 w-4" />
@@ -199,13 +200,13 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
           </div>
           <div className={cn('min-w-0 leading-tight', collapsed && 'hidden')}>
             <div className="truncate text-sm font-medium text-white">{user.fullName}</div>
-            <div className="truncate text-xs capitalize text-slate-500">{user.roleName.replace(/_/g, ' ')}</div>
+            <div className="truncate text-xs capitalize text-slate-500">{tr(user.roleName.replace(/_/g, ' '))}</div>
           </div>
         </div>
       )}
       <div className="space-y-1 px-3 pb-3">
-        {isSuperAdmin && <Link href="/settings" title="Settings" className={cn('flex items-center rounded-lg py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-gold', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><Settings className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>Settings</span>}{disconnectedCount > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{disconnectedCount}</span>}</Link>}
-        <button type="button" title="Log out" onClick={clearSession} className={cn('flex w-full items-center rounded-lg py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-red-300', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><LogOut className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>Log out</span>}</button>
+        {isSuperAdmin && <Link href="/settings" title={tr('Settings')} className={cn('flex items-center rounded-lg py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-gold', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><Settings className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>{tr('Settings')}</span>}{disconnectedCount > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{disconnectedCount}</span>}</Link>}
+        <button type="button" title={tr('Log out')} onClick={clearSession} className={cn('flex w-full items-center rounded-lg py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-red-300', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><LogOut className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>{tr('Log out')}</span>}</button>
       </div>
       </footer>
     </aside>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { tr } from '@/i18n';
 import { usePathname, useRouter } from 'next/navigation';
 import { useIsFetching } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/auth-store';
@@ -119,7 +120,7 @@ export function ProtectedShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 text-muted-foreground">
         <div className="h-12 w-12 animate-spin rounded-full border-4 border-gold/25 border-t-gold" />
-        <p className="text-sm font-semibold text-navy">Loading your workspace…</p>
+        <p className="text-sm font-semibold text-navy">{tr('Loading your workspace…')}</p>
       </div>
     );
   }
@@ -165,8 +166,8 @@ export function ProtectedShell({ children }: { children: React.ReactNode }) {
             scrollbar thumb stuck short of the bottom. The /whatsapp branch already had this. */}
         <main ref={mainRef} className={pathname?.startsWith('/whatsapp') ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'min-h-0 flex-1 overflow-y-auto px-3 pb-24 pt-4 sm:px-5 md:p-6 lg:p-8'}>{blocked ? (
           <div className="mx-auto mt-16 max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
-            <p className="text-lg font-bold text-navy dark:text-white">You don't have access to this page</p>
-            <p className="mt-2 text-sm text-muted-foreground">Ask your administrator to switch it on for your login if you need it.</p>
+            <p className="text-lg font-bold text-navy dark:text-white">{tr("You don't have access to this page")}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{tr('Ask your administrator to switch it on for your login if you need it.')}</p>
           </div>
         ) : children}</main>
       </div>

@@ -10,6 +10,8 @@ import { useAuthStore } from '@/store/auth-store';
 import { takeReturnPath } from '@/lib/return-path';
 import { useToast } from '@/components/ui/toast';
 import { useBranding } from '@/components/branding-provider';
+import { LanguageSwitcher } from '@/components/shared/language-switcher';
+import { getLang, tr } from '@/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
@@ -37,19 +39,19 @@ export default function LoginPage() {
     try {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept-Language': getLang() },
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || 'Login failed');
+        throw new Error(body.message || tr('Login failed'));
       }
       const data = await res.json();
       setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, user: data.user });
-      toast('Logged in successfully', 'success');
+      toast(tr('Logged in successfully'), 'success');
       router.push(takeReturnPath() || '/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Login failed');
+      setError(tr(err.message || 'Login failed'));
     } finally {
       setLoading(false);
     }
@@ -120,6 +122,8 @@ export default function LoginPage() {
         }
       `}</style>
 
+      <div className="absolute right-4 top-4 z-20"><LanguageSwitcher /></div>
+
       <div className="animate-login-card relative z-10 flex w-full max-w-sm flex-col items-center">
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
           <div className={brand.logo_url ? "relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white p-1" : "relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-gold-400 to-gold-600 shadow-[0_0_35px_-5px_rgba(245,158,11,0.65)]"}>
@@ -129,7 +133,7 @@ export default function LoginPage() {
             <h1 className="bg-gradient-to-r from-gold-400 via-gold-500 to-amber-300 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
               {brand.company_name}
             </h1>
-            <p className="mt-1 text-sm text-slate-300">{brand.tagline} &middot; Sign in to continue</p>
+            <p className="mt-1 text-sm text-slate-300">{tr(brand.tagline)} &middot; {tr('Sign in to continue')}</p>
           </div>
         </div>
 
@@ -137,7 +141,7 @@ export default function LoginPage() {
           <form onSubmit={onSubmit} className="space-y-5">
             <div className="space-y-1.5">
               <Label htmlFor="email" className="text-slate-200">
-                Mobile Number or Email
+                {tr('Mobile Number or Email')}
               </Label>
               <Input
                 id="email"
@@ -146,13 +150,13 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Mobile number or email"
+                placeholder={tr('Mobile number or email')}
                 className="h-11 border-white/15 bg-white/95 focus-visible:ring-gold-500"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password" className="text-slate-200">
-                Password
+                {tr('Password')}
               </Label>
               <div className="relative">
                 <Input
@@ -168,7 +172,7 @@ export default function LoginPage() {
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 transition-colors hover:text-slate-800"
                   tabIndex={-1}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? tr('Hide password') : tr('Show password')}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -186,10 +190,10 @@ export default function LoginPage() {
               disabled={loading}
             >
               {loading ? (
-                'Signing in…'
+                tr('Signing in…')
               ) : (
                 <span className="flex items-center justify-center gap-2">
-                  Sign in
+                  {tr('Sign in')}
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                 </span>
               )}

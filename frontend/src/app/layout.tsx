@@ -4,6 +4,7 @@ import { QueryProvider } from '@/components/query-provider';
 import { ToastProvider } from '@/components/ui/toast';
 import { ConfirmDialogProvider } from '@/components/ui/confirm-dialog';
 import { BrandingProvider } from '@/components/branding-provider';
+import { LanguageProvider } from '@/i18n/provider';
 
 export const metadata: Metadata = {
   title: 'Errances Voyages — Tourism CRM',
@@ -22,11 +23,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // signal Google's own translate.js checks for.
     <html lang="en" translate="no">
       <body className="notranslate min-h-screen font-sans antialiased">
-        <QueryProvider>
-          <ToastProvider>
-            <ConfirmDialogProvider><BrandingProvider>{children}</BrandingProvider></ConfirmDialogProvider>
-          </ToastProvider>
-        </QueryProvider>
+        <LanguageProvider>
+          <QueryProvider>
+            <ToastProvider>
+              <ConfirmDialogProvider><BrandingProvider>{children}</BrandingProvider></ConfirmDialogProvider>
+            </ToastProvider>
+          </QueryProvider>
+        </LanguageProvider>
       </body>
     </html>
   );
