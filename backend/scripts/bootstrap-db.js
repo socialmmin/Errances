@@ -81,6 +81,32 @@ async function main() {
         log('WARNING: SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD not set (min 6 chars) - the placeholder seed password is active; change it immediately');
       }
     }
+
+    // One extra administrator login (e.g. for the team maintaining the CRM) without touching anyone's
+    // existing account: set PROVISION_ADMIN_LOGIN (an email) and PROVISION_ADMIN_PASSWORD, deploy once,
+    // then remove both. Insert-only -- an account that already uses that email is never changed. It is
+    // kept out of round-robin lead distribution and the daily WhatsApp work report.
+    const provLogin = (process.env.PROVISION_ADMIN_LOGIN || '').trim().toLowerCase();
+    const provPassword = process.env.PROVISION_ADMIN_PASSWORD || '';
+    if (provLogin && provPassword.length >= 8) {
+      if ((await c.query('SELECT 1 FROM users WHERE lower(email) = $1', [provLogin])).rowCount) {
+        log(`administrator ${provLogin} already exists - left unchanged`);
+      } else {
+        const role = (await c.query("SELECT id FROM roles WHERE name = 'super_admin' AND is_deleted = false LIMIT 1")).rows[0];
+        const branch = (await c.query('SELECT id FROM branches WHERE is_active = true AND is_deleted = false ORDER BY created_at LIMIT 1')).rows[0];
+        if (!role || !branch) {
+          log('WARNING: administrator not created - no super_admin role or active branch');
+        } else {
+          const hash = await require('bcrypt').hash(provPassword, 10);
+          await c.query(
+            `INSERT INTO users (email, password_hash, full_name, role_id, branch_id, is_active, participate_round_robin, daily_report_enabled)
+             VALUES ($1, $2, $3, $4, $5, true, false, false)`,
+            [provLogin, hash, (process.env.PROVISION_ADMIN_NAME || 'Administrator').trim(), role.id, branch.id],
+          );
+          log(`created administrator ${provLogin}`);
+        }
+      }
+    }
     log('database ready');
   } finally { await c.end(); }
 }
