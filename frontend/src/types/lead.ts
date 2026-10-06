@@ -11,6 +11,7 @@ export interface Lead {
   email: string | null;
   destination: string | null;
   itinerary_status: string | null;
+  last_reply_at?: string | null;
   travel_from: string | null;
   travel_to: string | null;
   adults: number;
@@ -57,6 +58,7 @@ export interface LeadRequirement {
 }
 
 export interface LeadInput {
+  lostReason?: string;
   customerName: string;
   phone?: string;
   whatsappNumber?: string;
@@ -75,5 +77,6 @@ export interface LeadInput {
   priority?: string;
   expectedRevenue?: number;
   remarks?: string;
+  assignedTo?: string;
   branchId: string;
 }

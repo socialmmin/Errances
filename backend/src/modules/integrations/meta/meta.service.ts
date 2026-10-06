@@ -27,6 +27,9 @@ export class MetaService implements OnModuleInit {
   private logger = new Logger('MetaService');
   private syncRunning = false;
   private lastAdAlert = '';
+  // Outcome of the last 5-minute recovery sync (it lists the Page's lead forms with the Page token,
+  // so a failure here means new Meta leads may not be arriving).
+  private lastSync: { at: string; ok: boolean; imported?: number; error?: string } | null = null;
 
   constructor(
     @Inject(PG_POOL) private pool: Pool,
@@ -106,11 +109,41 @@ export class MetaService implements OnModuleInit {
           next = reachedOlderLead ? undefined : page?.paging?.next;
         }
       }
+      this.lastSync = { at: new Date().toISOString(), ok: true, imported };
       this.logger.log(`Meta recovery sync completed: ${imported} imported, ${skipped} already present`);
       return { imported, skipped };
+    } catch (e) {
+      this.lastSync = { at: new Date().toISOString(), ok: false, error: (e as Error).message.slice(0, 300) };
+      throw e;
     } finally {
       this.syncRunning = false;
     }
+  }
+
+  // Live checks for Settings → Integrations: Page token, ad account, recovery sync, lead arrival.
+  async health() {
+    const pageId = this.config.get<string>('META_PAGE_ID');
+    const pageToken = this.config.get<string>('META_PAGE_ACCESS_TOKEN');
+    const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v23.0';
+    let page: { ok: boolean; name?: string; error?: string } = { ok: false, error: 'META_PAGE_ID / META_PAGE_ACCESS_TOKEN not set' };
+    if (pageId && pageToken) {
+      try {
+        const res = await fetch(`https://graph.facebook.com/${version}/${pageId}?fields=name&access_token=${encodeURIComponent(pageToken)}`);
+        const body: any = await res.json().catch(() => ({}));
+        page = res.ok ? { ok: true, name: body?.name } : { ok: false, error: body?.error?.message || `HTTP ${res.status}` };
+      } catch (e) { page = { ok: false, error: (e as Error).message }; }
+    }
+    const ads: any = await this.getAdAccountSummary().catch((e) => ({ connected: false, message: (e as Error).message }));
+    const { rows } = await this.pool.query(
+      `SELECT MAX(created_at) AS last_lead_at, COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours')::int AS leads_24h FROM meta_lead_events`);
+    return {
+      configured: !!(pageId && pageToken),
+      page,
+      adAccount: { connected: !!ads.connected, name: ads.accountName, status: ads.accountStatus, balance: ads.balance, warningLevel: ads.warningLevel, currency: ads.currency, error: ads.connected ? undefined : ads.message },
+      lastSync: this.lastSync,
+      lastLeadAt: rows[0].last_lead_at,
+      leads24h: rows[0].leads_24h,
+    };
   }
 
   verifySubscription(mode?: string, token?: string): boolean {
@@ -198,20 +231,24 @@ export class MetaService implements OnModuleInit {
   async campaignCoverage() {
     const [{ data: campaigns }, { rows: packages }] = await Promise.all([
       this.getCampaigns().catch(() => ({ data: [] as any[] })),
-      this.pool.query(`SELECT campaign_name, is_active, whatsapp_template_status, itinerary_pdf_object_key FROM tour_packages WHERE is_deleted = false AND campaign_name IS NOT NULL AND campaign_name <> ''`),
+      this.pool.query(`SELECT id, campaign_name, is_active, whatsapp_template_status, itinerary_pdf_object_key, auto_paused FROM tour_packages WHERE is_deleted = false AND campaign_name IS NOT NULL AND campaign_name <> ''`),
     ]);
     const byCampaign = new Map(packages.map((p: any) => [p.campaign_name, p]));
     const active = campaigns.filter((c: any) => (c.effective_status || c.status) === 'ACTIVE');
     const gaps = active
       .map((c: any) => {
         const pkg = byCampaign.get(c.name);
-        if (!pkg) return { id: c.id, name: c.name, reason: 'no_itinerary_mapped' };
-        if (!pkg.itinerary_pdf_object_key) return { id: c.id, name: c.name, reason: 'no_itinerary_mapped' };
-        if (pkg.whatsapp_template_status !== 'APPROVED') return { id: c.id, name: c.name, reason: 'template_not_approved' };
-        if (!pkg.is_active) return { id: c.id, name: c.name, reason: 'itinerary_inactive' };
+        if (!pkg) return { id: c.id, name: c.name, reason: 'no_itinerary_mapped', packageId: null };
+        if (!pkg.itinerary_pdf_object_key) return { id: c.id, name: c.name, reason: 'no_itinerary_mapped', packageId: pkg.id };
+        // Auto-paused (Meta throttling) is a deliberate, temporary, self-resolving state -- worth
+        // surfacing differently from a genuine setup gap so it doesn't read as something broken
+        // that needs fixing by hand.
+        if (pkg.auto_paused) return { id: c.id, name: c.name, reason: 'auto_paused', packageId: pkg.id };
+        if (pkg.whatsapp_template_status !== 'APPROVED') return { id: c.id, name: c.name, reason: 'template_not_approved', packageId: pkg.id };
+        if (!pkg.is_active) return { id: c.id, name: c.name, reason: 'itinerary_inactive', packageId: pkg.id };
         return null;
       })
-      .filter((g): g is { id: string; name: string; reason: string } => !!g);
+      .filter((g): g is { id: string; name: string; reason: string; packageId: string | null } => !!g);
     return {
       activeCampaigns: active.length,
       covered: active.length - gaps.length,
@@ -220,7 +257,10 @@ export class MetaService implements OnModuleInit {
   }
 
   async verifySignature(rawBody: Buffer | undefined, signatureHeader: string | undefined): Promise<boolean> {
-    if (!rawBody || !signatureHeader) return false;
+    if (!rawBody || !signatureHeader) {
+      this.logger.warn(`Meta lead webhook rejected: ${!rawBody ? 'raw request body not available (server body-parser setup)' : 'no X-Hub-Signature-256 header'}`);
+      return false;
+    }
     const { rows } = await this.pool.query(`SELECT app_secret FROM whatsapp_config WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`).catch(() => ({ rows: [] as any[] }));
     const secrets = [rows[0]?.app_secret, this.config.get<string>('META_APP_SECRET')].filter((v): v is string => !!v && !!v.trim());
     const providedBuf = Buffer.from(signatureHeader.replace(/^sha256=/, ''), 'hex');

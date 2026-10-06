@@ -9,7 +9,6 @@ import { useToast } from '@/components/ui/toast';
 import { useCreateVendor, useUpdateVendor } from '@/hooks/use-vendors';
 import { Vendor, VendorInput } from '@/types/vendor';
 import { useAuthStore } from '@/store/auth-store';
-import { tr } from '@/i18n';
 
 const VENDOR_TYPES = ['hotel', 'transport', 'guide', 'restaurant', 'activity', 'other'];
 const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground';
@@ -44,50 +43,50 @@ export function VendorForm({ vendor }: { vendor?: Vendor }) {
     try {
       if (isEdit) {
         await updateMutation.mutateAsync(payload);
-        toast(tr("Vendor updated"), 'success');
+        toast('Vendor updated', 'success');
       } else {
         await createMutation.mutateAsync(payload);
-        toast(tr("Vendor created"), 'success');
+        toast('Vendor created', 'success');
       }
       router.push('/vendors');
     } catch (err: any) {
-      toast(err.message || tr("Failed to save vendor"), 'error');
+      toast(err.message || 'Failed to save vendor', 'error');
     }
   }
 
   return (
     <form onSubmit={onSubmit} className="max-w-xl space-y-4">
       <div className="space-y-1">
-        <Label htmlFor="name">{tr("Vendor Name")}</Label>
+        <Label htmlFor="name">Vendor Name</Label>
         <Input id="name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <Label htmlFor="type">{tr("Type")}</Label>
+          <Label htmlFor="type">Type</Label>
           <select id="type" className={selectClass} value={form.type ?? ''} onChange={(e) => set('type', e.target.value || undefined)}>
-            <option value="">{tr("Select…")}</option>
+            <option value="">Select…</option>
             {VENDOR_TYPES.map((t) => (
-              <option key={t} value={t}>{tr(t)}</option>
+              <option key={t} value={t}>{t}</option>
             ))}
           </select>
         </div>
         <div className="space-y-1">
-          <Label htmlFor="gstNumber">{tr("GST Number")}</Label>
+          <Label htmlFor="gstNumber">GST Number</Label>
           <Input id="gstNumber" value={form.gstNumber} onChange={(e) => set('gstNumber', e.target.value)} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <Label htmlFor="phone">{tr("Phone")}</Label>
+          <Label htmlFor="phone">Phone</Label>
           <Input id="phone" value={form.phone} onChange={(e) => set('phone', e.target.value)} />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="email">{tr("Email")}</Label>
+          <Label htmlFor="email">Email</Label>
           <Input id="email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
         </div>
       </div>
       <div className="space-y-1">
-        <Label htmlFor="address">{tr("Address")}</Label>
+        <Label htmlFor="address">Address</Label>
         <textarea
           id="address"
           rows={2}
@@ -98,10 +97,10 @@ export function VendorForm({ vendor }: { vendor?: Vendor }) {
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="gold" disabled={saving}>
-          {saving ? tr("Saving…") : isEdit ? tr("Save changes") : tr("Create vendor")}
+          {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create vendor'}
         </Button>
         <Button type="button" variant="outline" onClick={() => router.push('/vendors')}>
-          {tr("Cancel")}
+          Cancel
         </Button>
       </div>
     </form>

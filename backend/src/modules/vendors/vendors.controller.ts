@@ -6,11 +6,12 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../common/rbac/role-permissions';
+import { BranchAccessService } from '../../common/guards/branch-access.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('vendors')
 export class VendorsController {
-  constructor(private vendorsService: VendorsService) {}
+  constructor(private vendorsService: VendorsService, private branchAccess: BranchAccessService) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.VENDORS_VIEW)
@@ -19,9 +20,11 @@ export class VendorsController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Req() req?: any,
   ) {
+    const effectiveBranchId = req?.user?.roleName === 'super_admin' ? branchId : req?.user?.branchId;
     return this.vendorsService.findAll({
-      branchId,
+      branchId: effectiveBranchId,
       search,
       page: page ? parseInt(page, 10) : undefined,
       pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
@@ -30,7 +33,8 @@ export class VendorsController {
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.VENDORS_VIEW)
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('vendors', id, req.user);
     return this.vendorsService.findOne(id);
   }
 
@@ -42,13 +46,15 @@ export class VendorsController {
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.VENDORS_EDIT)
-  update(@Param('id') id: string, @Body() dto: UpdateVendorDto) {
+  async update(@Param('id') id: string, @Body() dto: UpdateVendorDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('vendors', id, req.user);
     return this.vendorsService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermissions(PERMISSIONS.VENDORS_EDIT)
-  remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('vendors', id, req.user);
     return this.vendorsService.remove(id);
   }
 }

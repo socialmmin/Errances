@@ -30,6 +30,8 @@ export interface UserRow {
   branch_name: string | null;
   is_active: boolean;
   participate_round_robin: boolean;
+  assigned_leads?: number;
+  itinerary_sent?: number;
   last_login_at: string | null;
   created_at: string;
 }

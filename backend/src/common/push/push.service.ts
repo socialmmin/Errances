@@ -13,6 +13,9 @@ export interface PushSubscriptionInput {
 export class PushService {
   private logger = new Logger('PushService');
   private configured = false;
+  // Last real delivery attempt, for the Settings → Integrations live health check.
+  private lastError: string | undefined;
+  private lastDelivery: { at: string; sent: number; failed: number; title: string; error?: string } | null = null;
 
   constructor(
     @Inject(PG_POOL) private pool: Pool,
@@ -59,6 +62,8 @@ export class PushService {
     if (rows.length === 0) return;
 
     const message = JSON.stringify(payload);
+    let sent = 0;
+    let failed = 0;
     await Promise.all(
       rows.map(async (row) => {
         try {
@@ -66,16 +71,20 @@ export class PushService {
             { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } },
             message,
           );
+          sent++;
         } catch (err: any) {
+          failed++;
           // 404/410 = subscription expired or unsubscribed client-side -- clean it up.
           if (err.statusCode === 404 || err.statusCode === 410) {
             await this.removeSubscription(row.endpoint).catch(() => undefined);
           } else {
+            this.lastError = err.message;
             this.logger.error(`Push send failed for ${row.endpoint}: ${err.message}`);
           }
         }
       }),
     );
+    this.lastDelivery = { at: new Date().toISOString(), sent, failed, title: payload.title, error: failed ? this.lastError : undefined };
   }
 
   async notifyUsers(userIds: string[], payload: { title: string; body: string; url?: string }, includeSuperAdmins = true) {
@@ -96,9 +105,20 @@ export class PushService {
       catch (err: any) {
         failed++;
         if (err.statusCode === 404 || err.statusCode === 410) await this.removeSubscription(row.endpoint).catch(() => undefined);
-        else this.logger.error(`Push send failed: ${err.message}`);
+        else { this.lastError = err.message; this.logger.error(`Push send failed: ${err.message}`); }
       }
     }));
+    this.lastDelivery = { at: new Date().toISOString(), sent, failed, title: payload.title, error: failed ? this.lastError : undefined };
     this.logger.log(`notifyUsers: ${sent}/${rows.length} delivered (${failed} failed) -- ${payload.title}`);
+  }
+
+  async health() {
+    const { rows } = await this.pool.query(
+      `SELECT COUNT(*)::int AS devices,
+              COUNT(DISTINCT ps.user_id)::int AS users,
+              COUNT(DISTINCT ps.user_id) FILTER (WHERE r.name = 'super_admin')::int AS admins,
+              MAX(ps.created_at) AS last_subscribed
+         FROM push_subscriptions ps LEFT JOIN users u ON u.id = ps.user_id LEFT JOIN roles r ON r.id = u.role_id`);
+    return { configured: this.configured, ...rows[0], lastDelivery: this.lastDelivery };
   }
 }

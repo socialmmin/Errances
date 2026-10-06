@@ -18,6 +18,8 @@ services:
       - '5432:5432'
     volumes:
       - errance_pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U errance_app -d errance']
       interval: 5s
@@ -26,8 +28,7 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
     container_name: errance-backend
     restart: unless-stopped
     depends_on:
@@ -51,12 +52,12 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:4000/api
     container_name: errance-frontend
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api
     ports:
       - '3000:3000'
 
@@ -65,4 +66,4 @@ volumes:
     # Local dev volume only. Production backups are pg_dump-based against
     # the Coolify-managed Postgres instance — see ARCHITECTURE.md, backup
     # path convention: r2://errance-backups/ErranceVoyages_Tourism_2026/postgres/
-    name: errancevoyages_tourism_2026_pgdata
+    name: errance_tourism_aug2026_pgdata

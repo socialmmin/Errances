@@ -5,7 +5,6 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api-client';
 import { fetchPackageDelivery, useSendPendingItinerary } from '@/hooks/use-whatsapp';
-import { tr } from '@/i18n';
 
 // Turns automatic WhatsApp delivery of one itinerary on or off. Turning it ON
 // also offers to send it right away to every matching enquiry that hasn't
@@ -25,12 +24,16 @@ export function ActiveSwitch({ pkg }: { pkg: { id: string; is_active: boolean; w
         checked={pkg.is_active}
         disabled={update.isPending || sendPending.isPending}
         onCheckedChange={async (next) => {
-          if (next && pkg.whatsapp_template_status !== 'APPROVED') { toast(tr("Meta must approve this itinerary’s template first (Edit → Stage 3)."), 'error'); return; }
+          if (next && pkg.whatsapp_template_status !== 'APPROVED') { toast('Meta must approve this itinerary’s template first (Edit → Stage 3).', 'error'); return; }
           try {
             await update.mutateAsync(next);
-            toast(next ? tr("Automatic sending is ON for this itinerary") : tr("Automatic sending is OFF for this itinerary"), 'success');
+            // Activating an itinerary is a clear signal it's ready for real customers -- switch
+            // WhatsApp out of test mode at the same time, instead of leaving people to discover
+            // separately that "Active" was on but sends were still being quietly skipped as test.
+            if (next) { await api.patch('/whatsapp/automation', { liveMode: true }).catch(() => undefined); qc.invalidateQueries({ queryKey: ['whatsapp', 'automation'] }); qc.invalidateQueries({ queryKey: ['whatsapp', 'delivery', pkg.id] }); }
+            toast(next ? 'Automatic sending is ON, and live mode is now on (test mode disabled)' : 'Automatic sending is OFF for this itinerary', 'success');
           } catch (error: any) {
-            toast(error.message || tr("Could not update"), 'error');
+            toast(error.message || 'Could not update', 'error');
             return;
           }
           if (!next) return;
@@ -42,16 +45,16 @@ export function ActiveSwitch({ pkg }: { pkg: { id: string; is_active: boolean; w
             const r = await sendPending.mutateAsync(pkg.id);
             toast(
               status.liveMode
-                ? tr("Sent {sent}{value}", { sent: r.sent, value: r.failed ? `, ${r.failed} failed` : '' })
-                : tr("Test mode is ON — sent {sent} to test numbers, {skippedTestMode} real numbers skipped. Turn off test mode in Settings to reach everyone.", { sent: r.sent, skippedTestMode: r.skippedTestMode }),
+                ? `Sent ${r.sent}${r.failed ? `, ${r.failed} failed` : ''}`
+                : `Test mode is ON — sent ${r.sent} to test numbers, ${r.skippedTestMode} real numbers skipped. Turn off test mode in Settings to reach everyone.`,
               r.failed ? 'error' : 'success',
             );
           } catch (error: any) {
-            toast(error.message || tr("Could not send the backlog"), 'error');
+            toast(error.message || 'Could not send the backlog', 'error');
           }
         }}
       />
-      <span className={`text-xs font-semibold ${pkg.is_active ? 'text-emerald-700' : 'text-slate-500'}`}>{pkg.is_active ? tr("Active") : tr("Inactive")}</span>
+      <span className={`text-xs font-semibold ${pkg.is_active ? 'text-emerald-700' : 'text-slate-500'}`}>{pkg.is_active ? 'Active' : 'Inactive'}</span>
     </div>
   );
 }

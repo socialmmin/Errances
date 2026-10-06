@@ -8,10 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { useBookings, useBookingStats } from '@/hooks/use-bookings';
 import { Booking, BOOKING_STATUS_LABELS } from '@/types/booking';
-import { tr, locale } from '@/i18n';
 
 function formatCurrency(n: number) {
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -52,7 +51,7 @@ const columns: ColumnDef<Booking>[] = [
       const status = String(getValue() ?? 'pending_approval');
       return (
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_BADGE[status] ?? 'bg-muted'}`}>
-          {tr(BOOKING_STATUS_LABELS[status]) ?? tr(status)}
+          {BOOKING_STATUS_LABELS[status] ?? status}
         </span>
       );
     },
@@ -68,26 +67,26 @@ export default function BookingsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy dark:text-white">{tr("Bookings & Operations")}</h1>
+        <h1 className="text-2xl font-semibold text-navy dark:text-white">Bookings & Operations</h1>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("Total Bookings")}</p>
+          <p className="text-xs text-muted-foreground">Total Bookings</p>
           <p className="text-2xl font-semibold text-navy dark:text-white">{stats?.total_bookings ?? '—'}</p>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("Balance Due")}</p>
+          <p className="text-xs text-muted-foreground">Balance Due</p>
           <p className="text-2xl font-semibold text-red-600">{formatCurrency(stats?.balance_due ?? 0)}</p>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("In Progress")}</p>
+          <p className="text-xs text-muted-foreground">In Progress</p>
           <p className="text-2xl font-semibold text-navy dark:text-white">{stats?.in_progress_count ?? '—'}</p>
         </CardContent></Card>
       </div>
 
       <Input
-        placeholder={tr("Search by booking number or customer…")}
+        placeholder="Search by booking number or customer…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="max-w-sm"
@@ -95,7 +94,7 @@ export default function BookingsPage() {
 
       {isError && (
         <p className="text-sm text-red-500">
-          {tr("Failed to load bookings:")}{' '}{(error as Error)?.message ?? tr("unknown error")}
+          Failed to load bookings: {(error as Error)?.message ?? 'unknown error'}
         </p>
       )}
 

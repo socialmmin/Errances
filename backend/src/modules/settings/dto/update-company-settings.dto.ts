@@ -1,12 +1,12 @@
-import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 export class UpdateCompanySettingsDto {
   @IsOptional() @IsString() @MaxLength(150) companyName?: string;
   @IsOptional() @IsString() @MaxLength(150) legalName?: string;
   @IsOptional() @IsString() @MaxLength(100) tagline?: string;
-  @IsOptional() @IsUrl({ require_tld: false }) logoUrl?: string;
-  @IsOptional() @IsString() logoObjectKey?: string;
-  @IsOptional() @IsUrl({ require_tld: false }) faviconUrl?: string;
-  @IsOptional() @IsString() faviconObjectKey?: string;
+  @IsOptional() @IsString() @MaxLength(600) logoUrl?: string | null;
+  @IsOptional() @IsString() logoObjectKey?: string | null;
+  @IsOptional() @IsString() @MaxLength(600) faviconUrl?: string | null;
+  @IsOptional() @IsString() faviconObjectKey?: string | null;
   @IsOptional() @IsString() @MaxLength(30) phone?: string;
   @IsOptional() @IsString() @MaxLength(150) email?: string;
   @IsOptional() @IsString() @MaxLength(250) website?: string;

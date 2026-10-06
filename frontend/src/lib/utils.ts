@@ -1,7 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import { locale } from '@/i18n';
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -9,7 +8,7 @@ export function cn(...inputs: ClassValue[]) {
 // Money is stored as integer minor units (e.g. paise) in the backend.
 export function formatMoney(minorUnits: number | string | null | undefined, currency = 'INR') {
   const value = Number(minorUnits ?? 0) / 100;
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency }).format(value);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(value);
 }
 
 // Indian numbers show as the plain 10-digit mobile (no +91 / 91 / 0 prefix);

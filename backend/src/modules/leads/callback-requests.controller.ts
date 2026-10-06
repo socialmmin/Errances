@@ -1,28 +1,35 @@
-import { Body, Controller, Get, Inject, Param, Patch, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Req, UseGuards } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../../common/db/pool.module';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../common/rbac/role-permissions';
+import { RequireAccess } from '../../common/access/access.service';
+import { assertLeadVisible, leadVisibleSql, seesAllLeads } from '../../common/leads/lead-visibility';
 
 // A customer tapping "Call our experts" must never just fade into a popup
 // nobody remembers. This stays on this list, pending, until someone actually
 // makes the call and marks it done here.
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireAccess('callbacks', 'dashboard.calls')
 @Controller('callback-requests')
 export class CallbackRequestsController {
   constructor(@Inject(PG_POOL) private pool: Pool) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.LEADS_VIEW)
-  async list() {
+  @RequirePermissions(PERMISSIONS.LEADS_VIEW)  async list(@Req() req: any) {
+    // Salespeople only see callbacks for leads assigned/shared to them. A callback with no matching
+    // lead (unknown number) is only visible to a super admin until the lead is created and assigned.
+    const scoped = !seesAllLeads(req.user);
     const { rows } = await this.pool.query(
       `SELECT c.*, u.full_name AS called_by_name, l.destination
          FROM callback_requests c
          LEFT JOIN users u ON u.id = c.called_by
          LEFT JOIN leads l ON l.id = c.lead_id
+        ${scoped ? `WHERE c.lead_id IS NOT NULL AND ${leadVisibleSql('c.lead_id', '$1')}` : ''}
         ORDER BY (c.called_at IS NULL) DESC, c.requested_at DESC LIMIT 500`,
+      scoped ? [req.user.userId] : [],
     );
     return { data: rows };
   }
@@ -47,9 +54,14 @@ export class CallbackRequestsController {
   @Patch(':id/mark-called')
   @RequirePermissions(PERMISSIONS.LEADS_EDIT)
   async markCalled(@Param('id') id: string, @Body() dto: { note?: string; outcome?: string; nextFollowUpAt?: string }, @Req() req: any) {
-    const note = String(dto?.note || '').trim();
-    const outcome = dto?.outcome && CallbackRequestsController.OUTCOME_LABEL[dto.outcome] ? dto.outcome : null;
-    const { rows } = await this.pool.query(
+    const note = String(dto?.note || '').trim();    const outcome = dto?.outcome && CallbackRequestsController.OUTCOME_LABEL[dto.outcome] ? dto.outcome : null;
+    // Closing the lead from here needs the reason typed, the same as everywhere else.
+    if (outcome === 'not_interested' && note.replace(/\s+/g, ' ').length < 10) throw new BadRequestException('Type what the customer said before marking this lead as Not Interested');
+    if (!seesAllLeads(req.user)) {
+      const { rows: owner } = await this.pool.query(`SELECT lead_id FROM callback_requests WHERE id = $1`, [id]);
+      await assertLeadVisible(this.pool, owner[0]?.lead_id, req.user);
+    }
+const { rows } = await this.pool.query(
       `UPDATE callback_requests SET called_at = now(), called_by = $2, outcome = $3, note = $4 WHERE id = $1 RETURNING *`,
       [id, req.user?.userId ?? null, outcome, note || null],
     );
@@ -64,8 +76,8 @@ export class CallbackRequestsController {
       );
       if (outcome) {
         await this.pool.query(
-          `UPDATE leads SET status = $2::lead_status, updated_at = now() WHERE id = $1`,
-          [request.lead_id, CallbackRequestsController.OUTCOME_STATUS[outcome]],
+          `UPDATE leads SET status = $2::lead_status, lost_reason = COALESCE($3, lost_reason), updated_at = now() WHERE id = $1`,
+          [request.lead_id, CallbackRequestsController.OUTCOME_STATUS[outcome], outcome === 'not_interested' ? `Said on callback — ${note.replace(/\s+/g, ' ').slice(0, 480)}` : null],
         );
       }
       // "Busy -- follow up again" schedules the one open follow-up for this lead right here,

@@ -133,7 +133,16 @@ export class PackagesRepository {
     const offsetIdx = values.length;
 
     const { rows } = await this.pool.query(
-      `SELECT * FROM tour_packages ${where} ORDER BY created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      `SELECT p.*, COALESCE(d.docs, '[]'::json) AS additional_documents
+         FROM tour_packages p
+         LEFT JOIN LATERAL (
+           SELECT json_agg(json_build_object(
+             'id', pid.id, 'duration_days', pid.duration_days, 'duration_nights', pid.duration_nights,
+             'file_name', pid.file_name, 'object_key', pid.object_key, 'whatsapp_template_status', pid.whatsapp_template_status
+           ) ORDER BY pid.sort_order) AS docs
+           FROM package_itinerary_documents pid WHERE pid.package_id = p.id
+         ) d ON true
+         ${where} ORDER BY p.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       values,
     );
     const countValues = values.slice(0, values.length - 2);
@@ -257,13 +266,18 @@ export class PackagesRepository {
           setClauses.push(`${col} = $${values.length}`);
         }
       }
-      // The call button's number lives inside the approved WhatsApp template,
-      // so changing the number means this itinerary needs its own template.
+      // The call button's number, and the uploaded document itself, both live inside the
+      // approved WhatsApp template (the document is the template's header media) -- changing
+      // either means Meta approved a DIFFERENT file/number than what's now configured, so the
+      // approval no longer actually covers what would be sent. Swapping the file without this
+      // check was the exact gap reported: re-uploading silently kept the old "In review" /
+      // "Approved" status with no indication anything needed resubmitting.
       let resetTemplate = false;
-      if (dto.contactNumber !== undefined || dto.contactButtonText !== undefined || dto.buttons !== undefined) {
-        const { rows: current } = await client.query(`SELECT contact_number, contact_button_text, buttons FROM tour_packages WHERE id = $1`, [id]);
+      if (dto.contactNumber !== undefined || dto.contactButtonText !== undefined || dto.buttons !== undefined || dto.itineraryPdfObjectKey !== undefined) {
+        const { rows: current } = await client.query(`SELECT contact_number, contact_button_text, buttons, itinerary_pdf_object_key FROM tour_packages WHERE id = $1`, [id]);
         if (dto.contactNumber !== undefined && String(current[0]?.contact_number || '') !== String(dto.contactNumber || '')) resetTemplate = true;
         if (dto.contactButtonText !== undefined && String(current[0]?.contact_button_text || '') !== String(dto.contactButtonText || '')) resetTemplate = true;
+        if (dto.itineraryPdfObjectKey !== undefined && String(current[0]?.itinerary_pdf_object_key || '') !== String(dto.itineraryPdfObjectKey || '')) resetTemplate = true;
         if (dto.buttons !== undefined) {
           const next = JSON.stringify(dto.buttons);
           // The reply text is ours to send, so only Meta-visible fields need re-approval.
@@ -456,6 +470,45 @@ export class PackagesRepository {
       `UPDATE tour_packages SET is_deleted = true WHERE id = $1 RETURNING id`,
       [id],
     );
+    return rows[0] || null;
+  }
+
+  // Additional itinerary documents beyond the primary one -- "Add another" appends here, no
+  // fixed limit. Every one sent to the customer is a separate WhatsApp template (one document
+  // per template is all Meta allows), so each row carries its own approval status.
+  async listDocuments(packageId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM package_itinerary_documents WHERE package_id=$1 ORDER BY sort_order ASC, created_at ASC`,
+      [packageId],
+    );
+    return rows;
+  }
+
+  async addDocument(packageId: string, input: { durationDays?: number; durationNights?: number; objectKey: string; fileName: string }) {
+    const { rows: order } = await this.pool.query(`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM package_itinerary_documents WHERE package_id=$1`, [packageId]);
+    const { rows } = await this.pool.query(
+      `INSERT INTO package_itinerary_documents (package_id, sort_order, duration_days, duration_nights, object_key, file_name)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [packageId, order[0].n, input.durationDays ?? null, input.durationNights ?? null, input.objectKey, input.fileName],
+    );
+    return rows[0];
+  }
+
+  async updateDocumentDuration(id: string, durationDays?: number, durationNights?: number) {
+    const { rows } = await this.pool.query(
+      `UPDATE package_itinerary_documents SET duration_days=$2, duration_nights=$3, updated_at=now() WHERE id=$1 RETURNING *`,
+      [id, durationDays ?? null, durationNights ?? null],
+    );
+    return rows[0] || null;
+  }
+
+  async deleteDocument(id: string) {
+    await this.pool.query(`DELETE FROM package_itinerary_documents WHERE id=$1`, [id]);
+    return { ok: true };
+  }
+
+  async getDocument(id: string) {
+    const { rows } = await this.pool.query(`SELECT * FROM package_itinerary_documents WHERE id=$1`, [id]);
     return rows[0] || null;
   }
 }

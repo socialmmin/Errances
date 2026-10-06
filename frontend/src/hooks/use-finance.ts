@@ -9,7 +9,18 @@ interface ListResponse<T> {
   total: number;
 }
 
-export function useInvoices(params: { status?: string; type?: string } = {}) {
+export interface PaymentReminderRow {
+  invoice_id: string; invoice_number: string; invoice_date: string; total_amount: number; paid_amount: number; last_paid_at: string | null;
+  quotation_id: string | null; quotation_number: string | null; lead_id: string | null; destination: string | null; customer_name: string | null; customer_phone: string | null;
+  reminder_id: string | null; send_at: string | null; reminder_by: string | null;
+  last_status: string | null; last_sent_at: string | null; last_send_at: string | null; last_error: string | null;
+}
+// Every invoice with a balance and its reminder; shared by the Payment Reminders page and the sidebar count.
+export function usePaymentReminders(options: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: ['finance', 'payment-reminders'], queryFn: () => api.get<{ data: PaymentReminderRow[] }>('/finance/payment-reminders'), enabled: options.enabled ?? true, refetchInterval: 60_000 });
+}
+
+export function useInvoices(params: { status?: string; type?: string } = {}, options: { enabled?: boolean } = {}) {
   const qs = new URLSearchParams();
   if (params.status) qs.set('status', params.status);
   if (params.type) qs.set('type', params.type);
@@ -17,6 +28,7 @@ export function useInvoices(params: { status?: string; type?: string } = {}) {
   return useQuery({
     queryKey: ['finance', 'invoices', params],
     queryFn: () => api.get<ListResponse<Invoice>>(`/finance/invoices${query ? `?${query}` : ''}`),
+    enabled: options.enabled ?? true,
   });
 }
 
@@ -34,6 +46,59 @@ export function useDeleteInvoice() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/finance/invoices/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['finance', 'invoices'] }),
+  });
+}
+
+export function useInvoice(id: string) {
+  return useQuery({
+    queryKey: ['finance', 'invoices', id],
+    queryFn: () => api.get<Invoice>(`/finance/invoices/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useRecordPayment(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { amount: number; method: string; reference?: string }) =>
+      api.post<Invoice>(`/finance/invoices/${id}/payments`, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+      qc.invalidateQueries({ queryKey: ['finance', 'invoices', id] });
+    },
+  });
+}
+
+// Both payment templates (confirmation + reminder) for the Invoices hero.
+export type FinanceTemplateKind = 'payment_receipt' | 'payment_reminder' | 'chat_reopen';
+export function useFinanceTemplates() {
+  return useQuery({ queryKey: ['finance', 'templates'], queryFn: () => api.get<Record<FinanceTemplateKind, ReminderTemplate>>('/finance/templates'), refetchInterval: 60000 });
+}
+export function useSubmitFinanceTemplate() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (kind: FinanceTemplateKind) => api.post<ReminderTemplate>(`/finance/templates/${kind}/submit`, {}), onSuccess: () => { qc.invalidateQueries({ queryKey: ['finance', 'templates'] }); qc.invalidateQueries({ queryKey: ['finance', 'reminder-template'] }); } });
+}
+export function useSyncFinanceTemplate() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (kind: FinanceTemplateKind) => api.post<ReminderTemplate>(`/finance/templates/${kind}/sync`, {}), onSuccess: () => qc.invalidateQueries({ queryKey: ['finance', 'templates'] }) });
+}
+
+export interface ReminderTemplate { templateId: string | null; templateName: string | null; templateStatus: string | null; templateRejectionReason: string | null }
+export function useReminderTemplate() {
+  return useQuery({ queryKey: ['finance', 'reminder-template'], queryFn: () => api.get<ReminderTemplate>('/finance/reminder-template'), refetchInterval: 60000 });
+}
+export function useSubmitReminderTemplate() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => api.post<ReminderTemplate>('/finance/reminder-template/submit', {}), onSuccess: (d) => qc.setQueryData(['finance', 'reminder-template'], d) });
+}
+export function useSyncReminderTemplate() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => api.post<ReminderTemplate>('/finance/reminder-template/sync', {}), onSuccess: (d) => qc.setQueryData(['finance', 'reminder-template'], d) });
+}
+
+export function useSendInvoiceReminder(id: string) {
+  return useMutation({
+    mutationFn: () => api.post<{ success: boolean; sentTo: string }>(`/finance/invoices/${id}/remind`, {}),
   });
 }
 

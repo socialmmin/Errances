@@ -9,7 +9,6 @@ import { CustomerForm } from '@/components/customers/customer-form';
 import { PermissionGuard } from '@/components/shared/permission-guard';
 import { PERMISSIONS } from '@/lib/permissions';
 import { Skeleton } from '@/components/ui/skeleton';
-import { tr } from '@/i18n';
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,19 +20,19 @@ export default function CustomerDetailPage() {
 
   async function onDelete() {
     const ok = await confirm({
-      title: tr("Delete this customer?"),
-      description: tr("This is a soft delete — it can be restored by a super admin."),
-      confirmLabel: tr("Delete"),
+      title: 'Delete this customer?',
+      description: 'This is a soft delete — it can be restored by a super admin.',
+      confirmLabel: 'Delete',
       variant: 'destructive',
     });
     if (!ok) return;
     await deleteMutation.mutateAsync(id);
-    toast(tr("Customer deleted"), 'success');
+    toast('Customer deleted', 'success');
     router.push('/customers');
   }
 
   if (isLoading) return <Skeleton className="h-64 w-full max-w-xl" />;
-  if (!customer) return <p>{tr("Customer not found.")}</p>;
+  if (!customer) return <p>Customer not found.</p>;
 
   return (
     <div className="space-y-4">
@@ -43,7 +42,7 @@ export default function CustomerDetailPage() {
         </h1>
         <PermissionGuard permission={PERMISSIONS.CUSTOMERS_DELETE}>
           <Button variant="destructive" size="sm" onClick={onDelete}>
-            {tr("Delete")}
+            Delete
           </Button>
         </PermissionGuard>
       </div>

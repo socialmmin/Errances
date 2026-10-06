@@ -8,5 +8,5 @@ export class UpdateUserDto {
   @IsOptional() @IsUUID() branchId?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsBoolean() participateRoundRobin?: boolean;
-  @IsOptional() @IsString() @MinLength(6) password?: string;
+  @IsOptional() @IsString() @MinLength(5) password?: string;
 }

@@ -25,16 +25,32 @@ export interface Invoice {
   invoice_number: string;
   booking_id: string | null;
   booking_number?: string | null;
+  quotation_id?: string | null;
+  quotation_number?: string | null;
+  public_share_token?: string | null;
   customer_id: string | null;
   customer_name?: string | null;
+  customer_phone?: string | null;
   amount: number;
   tax_amount: number;
   total_amount: number;
+  paid_amount?: number;
+  balance_due?: number;
   type: string;
   status: string;
   due_date: string | null;
   branch_id: string;
   created_at: string;
+  payments?: Payment[];
+  // cancellation and refunds
+  next_reminder_at?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+  cancel_policy?: string | null;
+  cancel_deduction?: number | null;
+  refunded_amount?: number;
+  retained_amount?: number;
+  refunds?: { id: string; amount: number; reason: string | null; method: string | null; reference: string | null; refunded_at: string; refunded_by_name: string | null }[];
 }
 
 export interface Payment {

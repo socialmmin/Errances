@@ -14,10 +14,9 @@ import {
   useRecordPayment, useAddVendorPayment, useDeleteBooking,
 } from '@/hooks/use-bookings';
 import { BOOKING_STATUS_LABELS, APPROVAL_STATUS_LABELS } from '@/types/booking';
-import { tr, locale } from '@/i18n';
 
 function formatCurrency(n: number) {
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
 const TABS = [
@@ -72,15 +71,15 @@ export function BookingDetail({ id }: { id: string }) {
   const [vendorNotes, setVendorNotes] = useState('');
   const [ptaUserId, setPtaUserId] = useState('');
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">{tr("Loading booking…")}</p>;
-  if (!booking) return <p className="text-sm text-muted-foreground">{tr("Booking not found.")}</p>;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading booking…</p>;
+  if (!booking) return <p className="text-sm text-muted-foreground">Booking not found.</p>;
 
   const balance = Math.max(booking.total_amount - booking.paid_amount, 0);
   const stepIndex = computeStepIndex(booking);
 
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" onClick={() => router.push('/bookings')}>{tr("← Back to Bookings")}</Button>
+      <Button variant="ghost" size="sm" onClick={() => router.push('/bookings')}>← Back to Bookings</Button>
 
       {/* Status bar */}
       <Card>
@@ -91,24 +90,24 @@ export function BookingDetail({ id }: { id: string }) {
               {booking.customer_name} · {booking.travel_from ?? '—'} → {booking.travel_to ?? '—'}
             </p>
             <p className="text-xs text-muted-foreground">
-              {tr("Status:")}{' '}{tr(BOOKING_STATUS_LABELS[booking.status]) ?? tr(booking.status)}{' '}{tr("· Approval:")}{' '}{tr(APPROVAL_STATUS_LABELS[booking.approval_status]) ?? booking.approval_status}
-              {booking.ops_executive_name ? tr(" · PTA: {ops_executive_name}", { ops_executive_name: booking.ops_executive_name }) : ''}
+              Status: {BOOKING_STATUS_LABELS[booking.status] ?? booking.status} · Approval: {APPROVAL_STATUS_LABELS[booking.approval_status] ?? booking.approval_status}
+              {booking.ops_executive_name ? ` · PTA: ${booking.ops_executive_name}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-xs text-muted-foreground">{tr("Total")}</p>
+              <p className="text-xs text-muted-foreground">Total</p>
               <p className="font-semibold">{formatCurrency(booking.total_amount)}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-muted-foreground">{tr("Paid")}</p>
+              <p className="text-xs text-muted-foreground">Paid</p>
               <p className="font-semibold text-green-600">{formatCurrency(booking.paid_amount)}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-muted-foreground">{tr("Balance")}</p>
+              <p className="text-xs text-muted-foreground">Balance</p>
               <p className={`font-semibold ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(balance)}</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => router.push(`/bookings/${id}/today-tour`)}>{tr("Today's Tour")}</Button>
+            <Button variant="outline" size="sm" onClick={() => router.push(`/bookings/${id}/today-tour`)}>Today's Tour</Button>
           </div>
         </CardContent>
       </Card>
@@ -125,7 +124,7 @@ export function BookingDetail({ id }: { id: string }) {
                   : 'bg-muted text-muted-foreground'
                 }`}
               >
-                {tr(s.label)}
+                {s.label}
               </span>
               {i < STEPS.length - 1 && <span className="text-muted-foreground">→</span>}
             </div>
@@ -143,14 +142,14 @@ export function BookingDetail({ id }: { id: string }) {
               t.id === activeTab ? 'border-gold text-navy dark:text-gold' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tr(t.label)}
+            {t.label}
           </button>
         ))}
       </div>
 
       {activeTab === 'overview' && (
         <Card><CardContent className="space-y-3 p-4">
-          <p className="text-sm font-medium">{tr("Checklist")}</p>
+          <p className="text-sm font-medium">Checklist</p>
           {(booking.checklist ?? []).map((item) => (
             <label key={item.id} className="flex items-center gap-2 text-sm">
               <input
@@ -162,15 +161,15 @@ export function BookingDetail({ id }: { id: string }) {
             </label>
           ))}
           <div className="pt-3">
-            <Label>{tr("Assign PTA (Operations Executive user id)")}</Label>
+            <Label>Assign PTA (Operations Executive user id)</Label>
             <div className="mt-1.5 flex gap-2">
-              <Input value={ptaUserId} onChange={(e) => setPtaUserId(e.target.value)} placeholder={tr("user id")} />
+              <Input value={ptaUserId} onChange={(e) => setPtaUserId(e.target.value)} placeholder="user id" />
               <Button
                 size="sm"
                 disabled={!ptaUserId || assignPta.isPending}
                 onClick={() => assignPta.mutate({ id, userId: ptaUserId })}
               >
-                {tr("Assign")}
+                Assign
               </Button>
             </div>
           </div>
@@ -179,7 +178,7 @@ export function BookingDetail({ id }: { id: string }) {
 
       {activeTab === 'approval' && (
         <Card><CardContent className="space-y-3 p-4">
-          <p className="text-sm">{tr("Vendor cost entries")}</p>
+          <p className="text-sm">Vendor cost entries</p>
           {(booking.vendorPayments ?? []).map((vp) => (
             <div key={vp.id} className="flex justify-between rounded border p-2 text-sm">
               <span>{vp.vendor_name ?? vp.vendor_id}</span>
@@ -187,9 +186,9 @@ export function BookingDetail({ id }: { id: string }) {
             </div>
           ))}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <Input placeholder={tr("Vendor ID")} value={vendorId} onChange={(e) => setVendorId(e.target.value)} />
-            <Input placeholder={tr("Amount")} type="number" value={vendorAmount} onChange={(e) => setVendorAmount(e.target.value)} />
-            <Input placeholder={tr("Notes")} value={vendorNotes} onChange={(e) => setVendorNotes(e.target.value)} />
+            <Input placeholder="Vendor ID" value={vendorId} onChange={(e) => setVendorId(e.target.value)} />
+            <Input placeholder="Amount" type="number" value={vendorAmount} onChange={(e) => setVendorAmount(e.target.value)} />
+            <Input placeholder="Notes" value={vendorNotes} onChange={(e) => setVendorNotes(e.target.value)} />
           </div>
           <Button
             size="sm"
@@ -199,7 +198,7 @@ export function BookingDetail({ id }: { id: string }) {
               setVendorId(''); setVendorAmount(''); setVendorNotes('');
             }}
           >
-            {tr("Add Vendor Cost")}
+            Add Vendor Cost
           </Button>
           <PermissionGuard permission={PERMISSIONS.FINANCE_APPROVE_REFUND}>
             <div className="pt-2">
@@ -207,7 +206,7 @@ export function BookingDetail({ id }: { id: string }) {
                 disabled={booking.approval_status === 'approved' || approve.isPending}
                 onClick={() => approve.mutate(id)}
               >
-                {booking.approval_status === 'approved' ? tr("Approved") : tr("Approve Booking")}
+                {booking.approval_status === 'approved' ? 'Approved' : 'Approve Booking'}
               </Button>
             </div>
           </PermissionGuard>
@@ -216,28 +215,28 @@ export function BookingDetail({ id }: { id: string }) {
 
       {activeTab === 'itinerary' && (
         <Card><CardContent className="p-4">
-          <p className="mb-2 text-xs text-muted-foreground">{tr("Snapshot captured at conversion time — not live.")}</p>
+          <p className="mb-2 text-xs text-muted-foreground">Snapshot captured at conversion time — not live.</p>
           <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs">
-            {booking.itinerary_snapshot ? JSON.stringify(booking.itinerary_snapshot, null, 2) : tr("No itinerary snapshot.")}
+            {booking.itinerary_snapshot ? JSON.stringify(booking.itinerary_snapshot, null, 2) : 'No itinerary snapshot.'}
           </pre>
         </CardContent></Card>
       )}
 
       {activeTab === 'travelers' && (
         <Card><CardContent className="space-y-2 p-4">
-          {(booking.travelers ?? []).length === 0 && <p className="text-sm text-muted-foreground">{tr("No travelers added.")}</p>}
+          {(booking.travelers ?? []).length === 0 && <p className="text-sm text-muted-foreground">No travelers added.</p>}
           {(booking.travelers ?? []).map((t) => {
             const expiryWarning = t.passport_expiry
               ? (new Date(t.passport_expiry).getTime() - Date.now()) / 86400000 < 180
               : false;
             return (
               <div key={t.id} className="rounded border p-2 text-sm">
-                <p className="font-medium">{t.full_name}{t.is_lead_traveler ? tr(" (Lead)") : ''}</p>
+                <p className="font-medium">{t.full_name}{t.is_lead_traveler ? ' (Lead)' : ''}</p>
                 <p className="text-xs text-muted-foreground">
-                  {tr("Passport:")}{' '}{t.passport_number ?? '—'} {t.nationality ? `· ${t.nationality}` : ''}
+                  Passport: {t.passport_number ?? '—'} {t.nationality ? `· ${t.nationality}` : ''}
                   {t.passport_expiry && (
                     <span className={expiryWarning ? 'ml-1 text-red-600' : ''}>
-                      {tr("· Expiry:")}{' '}{t.passport_expiry}{expiryWarning ? tr(" (expiring soon)") : ''}
+                      · Expiry: {t.passport_expiry}{expiryWarning ? ' (expiring soon)' : ''}
                     </span>
                   )}
                 </p>
@@ -249,16 +248,16 @@ export function BookingDetail({ id }: { id: string }) {
 
       {activeTab === 'hotels' && (
         <Card><CardContent className="space-y-2 p-4">
-          {(booking.hotels ?? []).length === 0 && <p className="text-sm text-muted-foreground">{tr("No hotels booked.")}</p>}
+          {(booking.hotels ?? []).length === 0 && <p className="text-sm text-muted-foreground">No hotels booked.</p>}
           {(booking.hotels ?? []).map((h) => (
             <div key={h.id} className="flex items-center justify-between rounded border p-2 text-sm">
               <div>
                 <p className="font-medium">{h.hotel_name ?? '—'}</p>
-                <p className="text-xs text-muted-foreground">{h.check_in} → {h.check_out} · {h.rooms}{' '}{tr("room(s) ·")}{' '}{h.vendor_name ?? '—'}</p>
+                <p className="text-xs text-muted-foreground">{h.check_in} → {h.check_out} · {h.rooms} room(s) · {h.vendor_name ?? '—'}</p>
               </div>
               <div className="text-right">
                 <p>{formatCurrency(h.cost)}</p>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{tr(h.status)}</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{h.status}</span>
               </div>
             </div>
           ))}
@@ -267,16 +266,16 @@ export function BookingDetail({ id }: { id: string }) {
 
       {activeTab === 'flights' && (
         <Card><CardContent className="space-y-2 p-4">
-          {(booking.flights ?? []).length === 0 && <p className="text-sm text-muted-foreground">{tr("No flights booked.")}</p>}
+          {(booking.flights ?? []).length === 0 && <p className="text-sm text-muted-foreground">No flights booked.</p>}
           {(booking.flights ?? []).map((f) => (
             <div key={f.id} className="flex items-center justify-between rounded border p-2 text-sm">
               <div>
                 <p className="font-medium">{f.airline ?? '—'} {f.flight_number ?? ''}</p>
-                <p className="text-xs text-muted-foreground">{f.departure_airport} → {f.arrival_airport}{' '}{tr("· PNR")}{' '}{f.pnr ?? '—'}</p>
+                <p className="text-xs text-muted-foreground">{f.departure_airport} → {f.arrival_airport} · PNR {f.pnr ?? '—'}</p>
               </div>
               <div className="text-right">
                 <p>{formatCurrency(f.cost)}</p>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{tr(f.status)}</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{f.status}</span>
               </div>
             </div>
           ))}
@@ -285,7 +284,7 @@ export function BookingDetail({ id }: { id: string }) {
 
       {activeTab === 'transport' && (
         <Card><CardContent className="space-y-2 p-4">
-          {(booking.transports ?? []).length === 0 && <p className="text-sm text-muted-foreground">{tr("No transport booked.")}</p>}
+          {(booking.transports ?? []).length === 0 && <p className="text-sm text-muted-foreground">No transport booked.</p>}
           {(booking.transports ?? []).map((t) => (
             <div key={t.id} className="flex items-center justify-between rounded border p-2 text-sm">
               <div>
@@ -294,7 +293,7 @@ export function BookingDetail({ id }: { id: string }) {
               </div>
               <div className="text-right">
                 <p>{formatCurrency(t.cost)}</p>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{tr(t.status)}</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{t.status}</span>
               </div>
             </div>
           ))}
@@ -304,27 +303,27 @@ export function BookingDetail({ id }: { id: string }) {
       {activeTab === 'payments' && (
         <Card><CardContent className="space-y-4 p-4">
           <div className="grid grid-cols-3 gap-3 text-center">
-            <div><p className="text-lg font-bold">{formatCurrency(booking.total_amount)}</p><p className="text-xs text-muted-foreground">{tr("Total")}</p></div>
-            <div><p className="text-lg font-bold text-green-600">{formatCurrency(booking.paid_amount)}</p><p className="text-xs text-muted-foreground">{tr("Paid")}</p></div>
-            <div><p className={`text-lg font-bold ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(balance)}</p><p className="text-xs text-muted-foreground">{tr("Balance")}</p></div>
+            <div><p className="text-lg font-bold">{formatCurrency(booking.total_amount)}</p><p className="text-xs text-muted-foreground">Total</p></div>
+            <div><p className="text-lg font-bold text-green-600">{formatCurrency(booking.paid_amount)}</p><p className="text-xs text-muted-foreground">Paid</p></div>
+            <div><p className={`text-lg font-bold ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(balance)}</p><p className="text-xs text-muted-foreground">Balance</p></div>
           </div>
 
           <div>
-            <p className="mb-1 text-sm font-medium">{tr("Installments")}</p>
+            <p className="mb-1 text-sm font-medium">Installments</p>
             {(booking.installments ?? []).map((inst) => (
               <div key={inst.id} className="flex justify-between rounded border p-2 text-sm">
-                <span>{tr("Due")}{' '}{inst.due_date}</span>
-                <span>{formatCurrency(inst.amount)} · {tr(inst.status)}</span>
+                <span>Due {inst.due_date}</span>
+                <span>{formatCurrency(inst.amount)} · {inst.status}</span>
               </div>
             ))}
           </div>
 
           <div>
-            <p className="mb-1 text-sm font-medium">{tr("Payment History")}</p>
-            {(booking.payments ?? []).length === 0 && <p className="text-sm text-muted-foreground">{tr("No payments recorded.")}</p>}
+            <p className="mb-1 text-sm font-medium">Payment History</p>
+            {(booking.payments ?? []).length === 0 && <p className="text-sm text-muted-foreground">No payments recorded.</p>}
             {(booking.payments ?? []).map((p) => (
               <div key={p.id} className="flex justify-between rounded border p-2 text-sm">
-                <span>{new Date(p.paid_at).toLocaleDateString(locale())} · {p.method ?? '—'}</span>
+                <span>{new Date(p.paid_at).toLocaleDateString('en-IN')} · {p.method ?? '—'}</span>
                 <span>{formatCurrency(p.amount)}</span>
               </div>
             ))}
@@ -333,20 +332,20 @@ export function BookingDetail({ id }: { id: string }) {
           <PermissionGuard permission={PERMISSIONS.BOOKINGS_EDIT}>
             <div className="flex items-end gap-2">
               <div>
-                <Label>{tr("Amount")}</Label>
+                <Label>Amount</Label>
                 <Input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="mt-1.5 w-32" />
               </div>
               <div>
-                <Label>{tr("Method")}</Label>
+                <Label>Method</Label>
                 <select
                   className="mt-1.5 h-9 rounded-md border bg-background px-2 text-sm"
                   value={paymentMethod}
                   onChange={(e) => setPaymentMethod(e.target.value)}
                 >
-                  <option value="cash">{tr("Cash")}</option>
-                  <option value="upi">{tr("UPI")}</option>
-                  <option value="bank_transfer">{tr("Bank Transfer")}</option>
-                  <option value="card">{tr("Card")}</option>
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="card">Card</option>
                 </select>
               </div>
               <Button
@@ -356,7 +355,7 @@ export function BookingDetail({ id }: { id: string }) {
                   setPaymentAmount('');
                 }}
               >
-                {tr("Record Payment")}
+                Record Payment
               </Button>
             </div>
           </PermissionGuard>
@@ -364,10 +363,10 @@ export function BookingDetail({ id }: { id: string }) {
       )}
 
       {activeTab === 'documents' && (
-        <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">{tr("Documents — not yet built (placeholder, matches Hala's reference).")}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Documents — not yet built (placeholder, matches Hala's reference).</p></CardContent></Card>
       )}
       {activeTab === 'notes' && (
-        <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">{tr("Notes — not yet built (placeholder, matches Hala's reference).")}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Notes — not yet built (placeholder, matches Hala's reference).</p></CardContent></Card>
       )}
 
       <PermissionGuard permission={PERMISSIONS.BOOKINGS_CANCEL}>
@@ -375,11 +374,11 @@ export function BookingDetail({ id }: { id: string }) {
           variant="outline"
           className="text-red-600"
           onClick={async () => {
-            const ok = await confirm({ title: tr("Delete this booking?"), confirmLabel: tr("Delete"), variant: 'destructive' });
+            const ok = await confirm({ title: 'Delete this booking?', confirmLabel: 'Delete', variant: 'destructive' });
             if (ok) remove.mutate(id, { onSuccess: () => router.push('/bookings') });
           }}
         >
-          {tr("Delete Booking")}
+          Delete Booking
         </Button>
       </PermissionGuard>
     </div>

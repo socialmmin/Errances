@@ -1,13 +1,6 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { VendorForm } from '@/components/vendors/vendor-form';
-import { tr } from '@/i18n';
-
+// Vendors are added from the pop-up on the Vendors page.
 export default function NewVendorPage() {
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-navy dark:text-white">{tr("New Vendor")}</h1>
-      <VendorForm />
-    </div>
-  );
+  redirect('/vendors');
 }

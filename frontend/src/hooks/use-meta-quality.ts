@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 
 export interface FunnelRow {
-  campaign: string; leads: number; valid: number; good: number; bad: number; qualified: number; quotation: number; advance: number; booked: number; revenue: number;
+  campaign: string; leads: number; valid: number; good: number; bad: number; neutral: number; qualified: number; quotation: number; advance: number; booked: number; revenue: number;
   spend: number | null; cpl: number | null; costPerValid: number | null; costPerGood: number | null; costPerQualified: number | null; costPerBooking: number | null; roas: number | null;
 }
 
@@ -40,4 +40,24 @@ export function useBackfillMetaIds() {
 }
 export function useAudienceCounts() {
   return useQuery({ queryKey: ['meta', 'audiences'], queryFn: () => api.get<Record<string, number>>('/integrations/meta/audiences') });
+}
+
+export interface MetaEventLogRow {
+  id: string; lead_id: string; customer_name: string; lead_number: string; crm_status: string; campaign_name: string;
+  event_name: string; send_status: 'pending' | 'sent' | 'test_sent' | 'failed' | 'skipped';
+  response: string | null; sent_at: string | null; created_at: string;
+}
+export function useMetaEventLog(filter?: 'received' | 'not_received') {
+  return useQuery({
+    queryKey: ['meta', 'capi', 'events', filter ?? 'all'],
+    queryFn: () => api.get<{ data: MetaEventLogRow[] }>(`/integrations/meta/capi/events${filter ? `?filter=${filter}` : ''}`),
+    refetchInterval: 20000,
+  });
+}
+export function useRetryMetaEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (eventId: string) => api.post(`/integrations/meta/capi/events/${eventId}/retry`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['meta', 'capi'] }),
+  });
 }

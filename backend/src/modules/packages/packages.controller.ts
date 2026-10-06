@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, StreamableFile, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, StreamableFile, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Pool } from 'pg';
+import { PG_POOL } from '../../common/db/pool.module';
 import { PackagesService } from './packages.service';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
@@ -6,6 +8,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../common/rbac/role-permissions';
+import { RequireAccess } from '../../common/access/access.service';
 import { R2Service } from '../../common/r2/r2.service';
 import { PackagesRepository } from './packages.repository';
 import { execFile } from 'child_process';
@@ -19,9 +22,10 @@ const run = promisify(execFile);
 const PRESET_KINDS = ['name', 'number', 'button', 'message', 'setup', 'reply', 'link'];
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireAccess('packages', 'quotations', 'failed_whatsapp')
 @Controller('packages')
 export class PackagesController {
-  constructor(private packagesService: PackagesService, private r2: R2Service, private repo: PackagesRepository) {}
+  constructor(private packagesService: PackagesService, private r2: R2Service, private repo: PackagesRepository, @Inject(PG_POOL) private pool: Pool) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.PACKAGES_VIEW)
@@ -84,6 +88,7 @@ export class PackagesController {
   }
 
   @Post(':id/thumbnail')
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
   saveThumbnail(@Param('id') id: string, @Body() dto: { dataUrl: string }) {
     const dataUrl = String(dto?.dataUrl || '');
@@ -98,6 +103,7 @@ export class PackagesController {
   }
 
   @Post('presets')
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
   addPreset(@Body() dto: { kind: string; value: string }) {
     const value = String(dto?.value || '').trim();
@@ -106,6 +112,7 @@ export class PackagesController {
   }
 
   @Patch('presets/:presetId')
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
   updatePreset(@Param('presetId') presetId: string, @Body() dto: { value: string }) {
     const value = String(dto?.value || '').trim();
@@ -114,9 +121,28 @@ export class PackagesController {
   }
 
   @Delete('presets/:presetId')
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
   deletePreset(@Param('presetId') presetId: string) {
     return this.repo.deletePreset(presetId);
+  }
+
+  // objectKey used to be presigned/fetched with no check it actually belongs to a package --
+  // any logged-in user with packages:view could read ANY file ever uploaded to R2 under any
+  // module (invoices, employee documents, company branding, WhatsApp media) just by knowing or
+  // guessing its key. Now the key must actually match a real itinerary file before it's served.
+  private async assertIsPackageDocument(objectKey: string) {
+    // Just uploaded in the itinerary form but not saved yet: still an itinerary file (random,
+    // unguessable name in the itinerary folder), so it can be previewed.
+    if (/^packages\/itineraries\/[0-9a-f-]{36}\.[a-z0-9]{1,8}$/i.test(objectKey)) return;
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM tour_packages WHERE itinerary_pdf_object_key = $1 AND is_deleted = false
+       UNION ALL
+       SELECT 1 FROM package_itinerary_documents WHERE object_key = $1
+       LIMIT 1`,
+      [objectKey],
+    );
+    if (!rows[0]) throw new BadRequestException('Not a recognized itinerary document');
   }
 
   // Serves the stored itinerary file through the API so the browser can render
@@ -125,6 +151,7 @@ export class PackagesController {
   @RequirePermissions(PERMISSIONS.PACKAGES_VIEW)
   async documentFile(@Query('objectKey') objectKey?: string) {
     if (!objectKey) throw new BadRequestException('objectKey required');
+    await this.assertIsPackageDocument(objectKey);
     const url = await this.r2.getPresignedDownloadUrl(objectKey, 300);
     const response = await fetch(url);
     if (!response.ok) throw new BadRequestException('Could not read the document');
@@ -135,6 +162,7 @@ export class PackagesController {
   @RequirePermissions(PERMISSIONS.PACKAGES_VIEW)
   async documentPreview(@Query('objectKey') objectKey?: string) {
     if (!objectKey) return { url: null };
+    await this.assertIsPackageDocument(objectKey);
     return { url: await this.r2.getPresignedDownloadUrl(objectKey, 900) };
   }
 
@@ -145,20 +173,57 @@ export class PackagesController {
   }
 
   @Post()
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_CREATE)
   create(@Body() dto: CreatePackageDto, @Req() req: any) {
     return this.packagesService.create(dto, req.user?.userId ?? null);
   }
 
   @Patch(':id')
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
   update(@Param('id') id: string, @Body() dto: UpdatePackageDto) {
     return this.packagesService.update(id, dto);
   }
 
   @Delete(':id')
+  @RequireAccess('packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_DELETE)
   remove(@Param('id') id: string) {
     return this.packagesService.remove(id);
+  }
+
+  // Additional itinerary documents ("Add another") -- no fixed limit, each one is its own
+  // WhatsApp template since Meta allows only one document attachment per template.
+  @Get(':id/documents')
+  @RequirePermissions(PERMISSIONS.PACKAGES_VIEW)
+  listDocuments(@Param('id') id: string) {
+    return this.repo.listDocuments(id);
+  }
+
+  @Post(':id/documents')
+  @RequireAccess('packages')
+  @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
+  addDocument(@Param('id') id: string, @Body() dto: { durationDays?: number; durationNights?: number; objectKey: string; fileName: string }) {
+    if (!dto.objectKey) throw new BadRequestException('Upload the document first');
+    // Nights is what the WhatsApp "Explore More Itineraries" duration list is built from --
+    // a document saved without it can never be offered to a customer, so block it here too
+    // (not just in the UI), the same rule for any caller.
+    if (dto.durationNights === undefined || dto.durationNights === null) throw new BadRequestException('Nights is required for an additional itinerary document');
+    return this.repo.addDocument(id, dto);
+  }
+
+  @Patch(':id/documents/:docId')
+  @RequireAccess('packages')
+  @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
+  updateDocument(@Param('docId') docId: string, @Body() dto: { durationDays?: number; durationNights?: number }) {
+    return this.repo.updateDocumentDuration(docId, dto.durationDays, dto.durationNights);
+  }
+
+  @Delete(':id/documents/:docId')
+  @RequireAccess('packages')
+  @RequirePermissions(PERMISSIONS.PACKAGES_EDIT)
+  removeDocument(@Param('docId') docId: string) {
+    return this.repo.deleteDocument(docId);
   }
 }

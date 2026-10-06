@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth-store';
 import { TourPackage } from '@/types/package';
-import { tr } from '@/i18n';
 
 interface PackageListResponse {
   data: TourPackage[];
@@ -29,11 +28,12 @@ export function useMetaCampaigns() {
   });
 }
 
-export interface CampaignGap { id: string; name: string; reason: 'no_itinerary_mapped' | 'template_not_approved' | 'itinerary_inactive' }
+export interface CampaignGap { id: string; name: string; reason: 'no_itinerary_mapped' | 'template_not_approved' | 'itinerary_inactive' | 'auto_paused'; packageId: string | null }
 export interface CampaignCoverage { activeCampaigns: number; covered: number; gaps: CampaignGap[] }
 
-export function useCampaignCoverage() {
+export function useCampaignCoverage(opts: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: ['campaign-coverage'],
     queryFn: () => api.get<CampaignCoverage>('/integrations/meta/campaign-coverage'),
     refetchInterval: 60_000,
@@ -83,6 +83,44 @@ export function useUpdatePackage(id: string) {
   });
 }
 
+export interface PackageDocument {
+  id: string; package_id: string; sort_order: number;
+  duration_days: number | null; duration_nights: number | null;
+  object_key: string | null; file_name: string | null;
+  whatsapp_template_id: string | null; whatsapp_template_name: string | null;
+  whatsapp_template_status: string | null; whatsapp_template_rejection_reason: string | null;
+}
+
+// Additional itinerary documents beyond the primary one -- "Add another", no fixed limit.
+export function usePackageDocuments(packageId?: string) {
+  return useQuery({
+    queryKey: ['packages', packageId, 'documents'],
+    queryFn: () => api.get<PackageDocument[]>(`/packages/${packageId}/documents`),
+    enabled: !!packageId,
+  });
+}
+export function useAddPackageDocument(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { durationDays?: number; durationNights?: number; objectKey: string; fileName: string }) => api.post<PackageDocument>(`/packages/${packageId}/documents`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['packages', packageId, 'documents'] }),
+  });
+}
+export function useUpdatePackageDocument(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string; durationDays?: number; durationNights?: number }) => api.patch<PackageDocument>(`/packages/${packageId}/documents/${id}`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['packages', packageId, 'documents'] }),
+  });
+}
+export function useDeletePackageDocument(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/packages/${packageId}/documents/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['packages', packageId, 'documents'] }),
+  });
+}
+
 export function useDeletePackage() {
   const qc = useQueryClient();
   return useMutation({
@@ -100,7 +138,7 @@ export async function uploadPackageImage(file: File, folder: string): Promise<st
     throw new Error('Only JPG, PNG, or WEBP images are allowed');
   }
   if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-    throw new Error(tr("Image must be under {size}MB", { size: MAX_IMAGE_MB }));
+    throw new Error(`Image must be under ${MAX_IMAGE_MB}MB`);
   }
   const token = useAuthStore.getState().accessToken;
   const formData = new FormData();
@@ -131,6 +169,10 @@ const MAX_DOCUMENT_MB = 100;
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'];
 const ACCEPTED_DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', ...IMAGE_EXTENSIONS];
 
+// Uploads go straight to R2 from the browser via a presigned PUT, not through this backend --
+// relaying the bytes through the VPS first (browser -> VPS -> R2) doubled the transfer time and
+// was bounded by the VPS's own outbound bandwidth, which made large itinerary PDFs painfully slow
+// to upload. The presign call itself is tiny and fast; only the actual file bytes go direct.
 export async function uploadPackageDocument(file: File, folder: string, onProgress?: (loaded: number, total: number) => void): Promise<{ url: string; objectKey: string }> {
   const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
   if (!ACCEPTED_DOCUMENT_EXTENSIONS.includes(extension)) {
@@ -141,27 +183,19 @@ export async function uploadPackageDocument(file: File, folder: string, onProgre
   if (file.size > maxMb * 1024 * 1024) {
     throw new Error(`${isImage ? 'Image' : 'Document'} must be under ${maxMb}MB`);
   }
-  const token = useAuthStore.getState().accessToken;
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('folder', folder);
-  return new Promise((resolve, reject) => {
+  const contentType = file.type || 'application/octet-stream';
+  const { uploadUrl, objectKey } = await api.post<{ uploadUrl: string; objectKey: string }>('/files/presign-upload', { fileName: file.name, contentType, folder });
+  await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_URL}/files/upload`);
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', contentType);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded, e.total); };
     xhr.onerror = () => reject(new Error('Network error during upload'));
-    xhr.onload = () => {
-      let body: any = null;
-      try { body = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const m = body?.message || xhr.statusText || 'Upload failed';
-        return reject(new Error(Array.isArray(m) ? m.join(', ') : m));
-      }
-      resolve({ url: body.url as string, objectKey: body.objectKey as string });
-    };
-    xhr.send(formData);
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`Upload failed (${xhr.status})`));
+    xhr.send(file);
   });
+  const preview = await getPackageDocumentPreview(objectKey).catch(() => ({ url: null }));
+  return { url: preview.url || '', objectKey };
 }
 
 export interface ItineraryPreset { id: string; kind: 'name' | 'number' | 'button' | 'message' | 'setup' | 'reply' | 'link'; value: string }

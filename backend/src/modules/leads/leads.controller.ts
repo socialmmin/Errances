@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../common/rbac/role-permissions';
+import { RequireAccess } from '../../common/access/access.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('leads')
@@ -53,6 +54,12 @@ export class LeadsController {
     }, request?.user);
   }
 
+  @Get('closed')
+  @RequirePermissions(PERMISSIONS.LEADS_VIEW)
+  closed(@Req() request: any) {
+    return this.leadsService.closedWithReasons(request.user);
+  }
+
   @Get('campaigns')
   @RequirePermissions(PERMISSIONS.LEADS_VIEW)
   findCampaigns(@Req() request: any) {
@@ -72,6 +79,7 @@ export class LeadsController {
   }
 
   @Post('export')
+  @RequireAccess('leads.export')
   @RequirePermissions(PERMISSIONS.LEADS_EXPORT)
   async exportCampaigns(
     @Body() dto: { campaigns: string[]; dateFrom?: string; dateTo?: string; allFiltered?: boolean },
@@ -82,11 +90,12 @@ export class LeadsController {
     if (!campaigns.length && !dto.allFiltered) return response.status(400).json({ message: 'Select at least one campaign' });
     const file = await this.leadsService.exportCampaigns(campaigns, dto.dateFrom, dto.dateTo, request.user);
     response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    response.setHeader('Content-Disposition', `attachment; filename="ErranceVoyages-Leads-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    response.setHeader('Content-Disposition', `attachment; filename="Errances-Leads-${new Date().toISOString().slice(0, 10)}.xlsx"`);
     response.send(file);
   }
 
   @Post('import')
+  @RequireAccess('leads.import')
   @RequirePermissions(PERMISSIONS.LEADS_CREATE)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
   importWorkbook(@UploadedFile() file: any, @Req() request: any) {
@@ -95,12 +104,14 @@ export class LeadsController {
   }
 
   @Patch('bulk-assign')
+  @RequireAccess('leads.assign')
   @RequirePermissions(PERMISSIONS.LEADS_ASSIGN)
-  bulkAssign(@Body() dto: { leadIds: string[]; assignedTo: string }) {
-    return this.leadsService.bulkAssign(dto.leadIds, dto.assignedTo);
+  bulkAssign(@Body() dto: { leadIds: string[]; assignedTo: string }, @Req() request: any) {
+    return this.leadsService.bulkAssign(dto.leadIds, dto.assignedTo, request?.user?.userId);
   }
 
   @Patch(':id/collaborators')
+  @RequireAccess('leads.assign')
   @RequirePermissions(PERMISSIONS.LEADS_ASSIGN)
   setCollaborators(@Param('id') id: string, @Body() dto: { userIds: string[] }, @Req() request: any) {
     return this.leadsService.setCollaborators(id, dto.userIds, request.user?.userId ?? null);
@@ -114,11 +125,16 @@ export class LeadsController {
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.LEADS_VIEW)
-  findOne(@Param('id') id: string) {
-    return this.leadsService.findOne(id);
+  findOne(@Param('id') id: string, @Req() request: any) {
+    // Every other /leads/:id route (update, delete, addRequirement) already passes
+    // request.user through to enforce branch/assignment scoping -- this one didn't, so any
+    // user with generic "view leads" permission could read any lead by id/url regardless of
+    // branch or assignment (findAll scopes correctly; this was the one route that didn't).
+    return this.leadsService.findOne(id, request.user);
   }
 
   @Post()
+  @RequireAccess('leads.add')
   @RequirePermissions(PERMISSIONS.LEADS_CREATE)
   create(@Body() dto: CreateLeadDto, @Req() req: any) {
     return this.leadsService.create(dto, req.user?.userId ?? null);
@@ -131,6 +147,7 @@ export class LeadsController {
   }
 
   @Delete(':id')
+  @RequireAccess('leads.delete')
   @RequirePermissions(PERMISSIONS.LEADS_DELETE)
   remove(@Param('id') id: string, @Req() request: any) {
     return this.leadsService.remove(id, request.user);

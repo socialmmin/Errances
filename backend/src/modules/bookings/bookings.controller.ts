@@ -10,11 +10,13 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../common/rbac/role-permissions';
+import { BranchAccessService } from '../../common/guards/branch-access.service';
+import { AuditService } from '../../common/audit/audit.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('bookings')
 export class BookingsController {
-  constructor(private bookingsService: BookingsService) {}
+  constructor(private bookingsService: BookingsService, private branchAccess: BranchAccessService, private audit: AuditService) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.BOOKINGS_VIEW)
@@ -24,9 +26,11 @@ export class BookingsController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Req() req?: any,
   ) {
+    const effectiveBranchId = req?.user?.roleName === 'super_admin' ? branchId : req?.user?.branchId;
     return this.bookingsService.findAll({
-      branchId,
+      branchId: effectiveBranchId,
       status,
       search,
       page: page ? parseInt(page, 10) : undefined,
@@ -36,13 +40,14 @@ export class BookingsController {
 
   @Get('stats')
   @RequirePermissions(PERMISSIONS.BOOKINGS_VIEW)
-  stats(@Query('branchId') branchId?: string) {
-    return this.bookingsService.stats(branchId);
+  stats(@Query('branchId') branchId?: string, @Req() req?: any) {
+    return this.bookingsService.stats(req?.user?.roleName === 'super_admin' ? branchId : req?.user?.branchId);
   }
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.BOOKINGS_VIEW)
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.findOne(id);
   }
 
@@ -54,54 +59,64 @@ export class BookingsController {
 
   @Post('from-quotation/:quotationId')
   @RequirePermissions(PERMISSIONS.BOOKINGS_CREATE)
-  createFromQuotation(@Param('quotationId') quotationId: string, @Body() dto: CreateBookingDto, @Req() req: any) {
+  async createFromQuotation(@Param('quotationId') quotationId: string, @Body() dto: CreateBookingDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('quotations', quotationId, req.user);
     return this.bookingsService.create({ ...dto, quotationId }, req.user?.userId ?? null);
   }
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  update(@Param('id') id: string, @Body() dto: UpdateBookingDto) {
+  async update(@Param('id') id: string, @Body() dto: UpdateBookingDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.update(id, dto);
   }
 
   @Patch(':id/approve')
   @RequirePermissions(PERMISSIONS.FINANCE_APPROVE_REFUND)
-  approve(@Param('id') id: string, @Req() req: any) {
-    return this.bookingsService.approve(id, req.user?.userId ?? null);
+  async approve(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
+    const result = await this.bookingsService.approve(id, req.user?.userId ?? null);
+    this.audit.log({ userId: req.user?.userId, branchId: req.user?.branchId, action: 'booking.approved', resourceType: 'booking', resourceId: id, result: 'success' });
+    return result;
   }
 
   @Patch(':id/assign-pta')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  assignPta(@Param('id') id: string, @Body() dto: AssignPtaDto) {
+  async assignPta(@Param('id') id: string, @Body() dto: AssignPtaDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.assignPta(id, dto.userId);
   }
 
   @Patch(':id/status')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  updateStatus(@Param('id') id: string, @Body('status') status: string) {
+  async updateStatus(@Param('id') id: string, @Body('status') status: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.updateStatus(id, status);
   }
 
   @Post(':id/checklist')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  addChecklistItem(@Param('id') id: string, @Body() dto: CreateChecklistItemDto) {
+  async addChecklistItem(@Param('id') id: string, @Body() dto: CreateChecklistItemDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.addChecklistItem(id, dto.item);
   }
 
   @Post(':id/checklist/:itemId/toggle')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  toggleChecklistItem(
+  async toggleChecklistItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body() dto: ToggleChecklistItemDto,
     @Req() req: any,
   ) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.toggleChecklistItem(id, itemId, dto.isDone ?? true, req.user?.userId ?? null);
   }
 
   @Post(':id/payments')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  recordPayment(@Param('id') id: string, @Body() dto: RecordPaymentDto, @Req() req: any) {
+  async recordPayment(@Param('id') id: string, @Body() dto: RecordPaymentDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.recordPayment(
       id,
       dto.amount,
@@ -115,7 +130,8 @@ export class BookingsController {
 
   @Post(':id/vendor-payments')
   @RequirePermissions(PERMISSIONS.BOOKINGS_EDIT)
-  addVendorPayment(@Param('id') id: string, @Body() dto: VendorPaymentDto, @Req() req: any) {
+  async addVendorPayment(@Param('id') id: string, @Body() dto: VendorPaymentDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
     return this.bookingsService.addVendorPayment(
       id,
       dto.vendorId,
@@ -128,7 +144,10 @@ export class BookingsController {
 
   @Delete(':id')
   @RequirePermissions(PERMISSIONS.BOOKINGS_CANCEL)
-  remove(@Param('id') id: string) {
-    return this.bookingsService.remove(id);
+  async remove(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('bookings', id, req.user);
+    const result = await this.bookingsService.remove(id);
+    this.audit.log({ userId: req.user?.userId, branchId: req.user?.branchId, action: 'booking.cancelled', resourceType: 'booking', resourceId: id, result: 'success' });
+    return result;
   }
 }

@@ -8,10 +8,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useFinanceKpis, usePayments, useOverdueInstallments } from '@/hooks/use-finance';
 import { Payment, OverdueInstallment, PAYMENT_STATUS_LABELS } from '@/types/finance';
-import { tr, locale } from '@/i18n';
 
 function formatCurrency(n: number) {
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
 const METHOD_BADGE: Record<string, string> = {
@@ -43,7 +42,7 @@ const paymentColumns: ColumnDef<Payment>[] = [
       if (!m) return '—';
       return (
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${METHOD_BADGE[m] ?? 'bg-muted'}`}>
-          {tr(m.replace(/_/g, ' '))}
+          {m.replace(/_/g, ' ')}
         </span>
       );
     },
@@ -56,12 +55,12 @@ const paymentColumns: ColumnDef<Payment>[] = [
       const status = String(getValue() ?? 'pending');
       return (
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_BADGE[status] ?? 'bg-muted'}`}>
-          {tr(PAYMENT_STATUS_LABELS[status]) ?? tr(status)}
+          {PAYMENT_STATUS_LABELS[status] ?? status}
         </span>
       );
     },
   },
-  { id: 'date', header: 'Date', cell: ({ row }) => new Date(row.original.paid_at).toLocaleDateString(locale()) },
+  { id: 'date', header: 'Date', cell: ({ row }) => new Date(row.original.paid_at).toLocaleDateString('en-IN') },
   { id: 'collected_by', header: 'Collected By', cell: ({ row }) => row.original.collected_by_name ?? '—' },
 ];
 
@@ -69,7 +68,7 @@ const overdueColumns: ColumnDef<OverdueInstallment>[] = [
   { id: 'booking', header: 'Booking', cell: ({ row }) => row.original.booking_number ?? '—' },
   { id: 'customer', header: 'Customer', cell: ({ row }) => row.original.customer_name ?? '—' },
   { accessorKey: 'amount', header: 'Amount', cell: ({ getValue }) => formatCurrency(Number(getValue() ?? 0)) },
-  { id: 'due_date', header: 'Due Date', cell: ({ row }) => new Date(row.original.due_date).toLocaleDateString(locale()) },
+  { id: 'due_date', header: 'Due Date', cell: ({ row }) => new Date(row.original.due_date).toLocaleDateString('en-IN') },
   {
     id: 'days_overdue',
     header: 'Days Overdue',
@@ -92,28 +91,28 @@ export default function FinancePage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy dark:text-white">{tr("Finance")}</h1>
+        <h1 className="text-2xl font-semibold text-navy dark:text-white">Finance</h1>
         <div className="flex gap-2">
-          <Link href="/finance/invoices"><Button variant="outline">{tr("Invoices")}</Button></Link>
-          <Link href="/finance/pta-collections"><Button variant="outline">{tr("PTA Collections")}</Button></Link>
+          <Link href="/finance/invoices"><Button variant="outline">Invoices</Button></Link>
+          <Link href="/finance/pta-collections"><Button variant="outline">PTA Collections</Button></Link>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("Today's Collection")}</p>
+          <p className="text-xs text-muted-foreground">Today&apos;s Collection</p>
           <p className="text-2xl font-semibold text-navy dark:text-white">{formatCurrency(kpis?.todayCollection ?? 0)}</p>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("This Month")}</p>
+          <p className="text-xs text-muted-foreground">This Month</p>
           <p className="text-2xl font-semibold text-navy dark:text-white">{formatCurrency(kpis?.monthCollection ?? 0)}</p>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("Outstanding")}</p>
+          <p className="text-xs text-muted-foreground">Outstanding</p>
           <p className="text-2xl font-semibold text-red-600">{formatCurrency(kpis?.outstanding ?? 0)}</p>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">{tr("Overdue")}</p>
+          <p className="text-xs text-muted-foreground">Overdue</p>
           <p className="text-2xl font-semibold text-amber-600">{kpis?.overdueCount ?? 0}</p>
         </CardContent></Card>
       </div>
@@ -127,7 +126,7 @@ export default function FinancePage() {
               t.id === activeTab ? 'border-gold text-navy dark:text-gold' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tr(t.label)}
+            {t.label}
             {t.id === 'overdue' && overdueCount > 0 && (
               <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
                 {overdueCount}

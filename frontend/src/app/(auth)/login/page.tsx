@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Eye, EyeOff, Plane, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,17 +10,14 @@ import { useAuthStore } from '@/store/auth-store';
 import { takeReturnPath } from '@/lib/return-path';
 import { useToast } from '@/components/ui/toast';
 import { useBranding } from '@/components/branding-provider';
-import { useT } from '@/i18n/provider';
-import { LanguageSwitcher } from '@/components/shared/language-switcher';
-import { tr, getLang } from '@/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 const SLIDES = [
-  { src: '/images/login-bg.jpg' },
-  { src: '/images/login-bg-2.jpg' },
-  { src: '/images/login-bg-3.jpg' },
-  { src: '/images/login-bg-4.jpg' },
+  { src: '/images/login-bg.jpg', caption: 'Taj Mahal, Agra' },
+  { src: '/images/login-bg-2.jpg', caption: 'Gateway of India, Mumbai' },
+  { src: '/images/login-bg-3.jpg', caption: 'Backwaters, Kerala' },
+  { src: '/images/login-bg-4.jpg', caption: 'Temple Gopuram, Tamil Nadu' },
 ];
 
 export default function LoginPage() {
@@ -28,7 +25,6 @@ export default function LoginPage() {
   const setSession = useAuthStore((s) => s.setSession);
   const { toast } = useToast();
   const brand = useBranding();
-  const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,19 +37,19 @@ export default function LoginPage() {
     try {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept-Language': getLang() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || t('login.failed'));
+        throw new Error(body.message || 'Login failed');
       }
       const data = await res.json();
       setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, user: data.user });
-      toast(t('login.success'), 'success');
+      toast('Logged in successfully', 'success');
       router.push(takeReturnPath() || '/dashboard');
     } catch (err: any) {
-      setError(err.message || t('login.failed'));
+      setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -65,8 +61,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-10">
-      {/* Crossfading, slow-zooming background slideshow of iconic Indian landmarks, washed out to keep the page white */}
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-navy-950 px-4 py-10">
+      {/* Crossfading, slow-zooming background slideshow of iconic Indian landmarks */}
       <div className="absolute inset-0">
         {SLIDES.map((slide, i) => (
           <div key={slide.src} className="absolute inset-0 animate-login-slide" style={{ animationDelay: `${i * 6}s` }}>
@@ -76,8 +72,8 @@ export default function LoginPage() {
             />
           </div>
         ))}
-        <div className="absolute inset-0 bg-gradient-to-b from-white/90 via-white/80 to-white/95" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(217,30,42,0.10)_100%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-navy-950/85 via-navy-950/70 to-navy-950/92" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(8,13,24,0.65)_100%)]" />
       </div>
 
       <style jsx>{`
@@ -124,24 +120,24 @@ export default function LoginPage() {
         }
       `}</style>
 
-      <div className="absolute right-4 top-4 z-20"><LanguageSwitcher /></div>
-
       <div className="animate-login-card relative z-10 flex w-full max-w-sm flex-col items-center">
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <img src={brand.logo_url || '/brand/logo.png'} alt={brand.company_name} className="h-20 w-auto max-w-[18rem] object-contain" />
+          <div className={brand.logo_url ? "relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white p-1" : "relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-gold-400 to-gold-600 shadow-[0_0_35px_-5px_rgba(245,158,11,0.65)]"}>
+            {brand.logo_url?<img src={brand.logo_url} alt="" className="h-full w-full object-contain"/>:<Plane className="h-7 w-7 -rotate-45 text-navy-900" strokeWidth={2.25} />}
+          </div>
           <div>
-            <h1 className="sr-only">
+            <h1 className="bg-gradient-to-r from-gold-400 via-gold-500 to-amber-300 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
               {brand.company_name}
             </h1>
-            <p className="mt-1 text-sm text-slate-600">{tr(brand.tagline)} &middot; {t('login.title')}</p>
+            <p className="mt-1 text-sm text-slate-300">{brand.tagline} &middot; Sign in to continue</p>
           </div>
         </div>
 
-        <div className="w-full rounded-3xl border border-border bg-white p-7 shadow-[0_20px_60px_-25px_rgba(17,24,39,0.35)]">
+        <div className="w-full rounded-3xl border border-white/10 bg-white/[0.08] p-7 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)] ring-1 ring-white/5 backdrop-blur-2xl">
           <form onSubmit={onSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-navy">
-                {t('login.identifier')}
+              <Label htmlFor="email" className="text-slate-200">
+                Mobile Number or Email
               </Label>
               <Input
                 id="email"
@@ -150,13 +146,13 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="9944946955"
-                className="h-11 border-border bg-white focus-visible:ring-gold-500"
+                placeholder="Mobile number or email"
+                className="h-11 border-white/15 bg-white/95 focus-visible:ring-gold-500"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-navy">
-                {t('login.password')}
+              <Label htmlFor="password" className="text-slate-200">
+                Password
               </Label>
               <div className="relative">
                 <Input
@@ -165,35 +161,35 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-11 border-border bg-white pr-10 focus-visible:ring-gold-500"
+                  className="h-11 border-white/15 bg-white/95 pr-10 focus-visible:ring-gold-500"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 transition-colors hover:text-slate-800"
                   tabIndex={-1}
-                  aria-label={showPassword ? t('login.hidePassword') : t('login.showPassword')}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
             {error && (
-              <p className="rounded-lg bg-gold-50 px-3 py-2 text-sm text-gold-600 ring-1 ring-gold-500/30">
+              <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300 ring-1 ring-red-500/30">
                 {error}
               </p>
             )}
             <Button
               type="submit"
               variant="gold"
-              className="group h-11 w-full text-base shadow-lg shadow-gold/20 transition-transform hover:scale-[1.01] active:scale-[0.99]"
+              className="group h-11 w-full text-base shadow-lg shadow-gold/25 transition-transform hover:scale-[1.01] active:scale-[0.99]"
               disabled={loading}
             >
               {loading ? (
-                t('login.signingIn')
+                'Signing in…'
               ) : (
                 <span className="flex items-center justify-center gap-2">
-                  {t('login.signIn')}
+                  Sign in
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                 </span>
               )}
@@ -202,7 +198,7 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-7 text-xs tracking-wide text-slate-500">
-          {brand.company_name} &middot; {t('login.poweredBy')}
+          ErranceVoyages_Tourism_2026 &middot; Powered by SocialMM
         </p>
       </div>
     </div>

@@ -3,7 +3,7 @@
 ## Project identity
 
 - **Canonical project id**: `ErranceVoyages_Tourism_2026`
-- **Owner / dev identifier**: `SocialMM_ErranceVoyages`
+- **Owner / dev identifier**: `Gowtham_ErrancesTravels`
 - **Reference project** (module structure, RBAC roles, schema shapes only —
   different stack): "Hala," a tourism ERP/CRM built on React+Vite+Supabase.
 - **Domains** (placeholders — do not need to resolve yet):

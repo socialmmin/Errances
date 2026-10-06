@@ -11,7 +11,6 @@ import { PermissionGuard } from '@/components/shared/permission-guard';
 import { PERMISSIONS } from '@/lib/permissions';
 import { useCustomers } from '@/hooks/use-customers';
 import { Customer } from '@/types/customer';
-import { tr } from '@/i18n';
 
 const columns: ColumnDef<Customer>[] = [
   { accessorKey: 'customer_code', header: 'Code' },
@@ -30,16 +29,16 @@ export default function CustomersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy dark:text-white">{tr("Customers")}</h1>
+        <h1 className="text-2xl font-semibold text-navy dark:text-white">Customers</h1>
         <PermissionGuard permission={PERMISSIONS.CUSTOMERS_CREATE}>
           <Link href="/customers/new">
-            <Button variant="gold">{tr("+ New Customer")}</Button>
+            <Button variant="gold">+ New Customer</Button>
           </Link>
         </PermissionGuard>
       </div>
 
       <Input
-        placeholder={tr("Search by name, phone, or email…")}
+        placeholder="Search by name, phone, or email…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="max-w-sm"
@@ -47,7 +46,7 @@ export default function CustomersPage() {
 
       {isError && (
         <p className="text-sm text-red-500">
-          {tr("Failed to load customers:")}{' '}{(error as Error)?.message ?? tr("unknown error")}
+          Failed to load customers: {(error as Error)?.message ?? 'unknown error'}
         </p>
       )}
 

@@ -9,10 +9,9 @@ interface QuotationListResponse {
   total: number;
 }
 
-export function useQuotations(params: { search?: string; status?: string } = {}) {
+export function useQuotations(params: { search?: string; status?: string; from?: string; to?: string; category?: string; destination?: string } = {}) {
   const qs = new URLSearchParams();
-  if (params.search) qs.set('search', params.search);
-  if (params.status) qs.set('status', params.status);
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
   const query = qs.toString();
   return useQuery({
     queryKey: ['quotations', params],
@@ -20,10 +19,12 @@ export function useQuotations(params: { search?: string; status?: string } = {})
   });
 }
 
-export function useQuotationStats() {
+export function useQuotationStats(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['quotations', 'stats'],
     queryFn: () => api.get<QuotationStats>('/quotations/stats'),
+    enabled: options.enabled ?? true,
+    refetchInterval: 60_000,
   });
 }
 
@@ -75,6 +76,36 @@ export function useSendQuotationWhatsApp(id: string) {
       qc.invalidateQueries({ queryKey: ['quotations'] });
       qc.invalidateQueries({ queryKey: ['quotations', id] });
     },
+  });
+}
+
+interface QuotationTemplateSettings {
+  templateId: string | null;
+  templateName: string | null;
+  templateStatus: string | null;
+  templateRejectionReason: string | null;
+}
+
+export function useQuotationTemplate() {
+  return useQuery({
+    queryKey: ['quotations', 'template'],
+    queryFn: () => api.get<QuotationTemplateSettings>('/quotations/template'),
+  });
+}
+
+export function useSubmitQuotationTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<QuotationTemplateSettings>('/quotations/template/submit', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['quotations', 'template'] }),
+  });
+}
+
+export function useSyncQuotationTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<QuotationTemplateSettings>('/quotations/template/sync', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['quotations', 'template'] }),
   });
 }
 

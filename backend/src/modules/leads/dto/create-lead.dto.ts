@@ -25,6 +25,8 @@ export class CreateLeadDto {
   @IsOptional() @IsUUID() assignedTo?: string;
   @IsOptional() @IsIn(PRIORITIES) priority?: string;
   @IsOptional() @IsIn(STATUSES) status?: string;
+  // why the lead was closed -- compulsory when the status becomes Not Interested or Lost
+  @IsOptional() @IsString() lostReason?: string;
   @IsOptional() @IsInt() @Min(0) expectedRevenue?: number;
   @IsOptional() @IsString() remarks?: string;
 

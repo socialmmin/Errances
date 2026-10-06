@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PackagesRepository } from './packages.repository';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
@@ -45,6 +45,15 @@ export class PackagesService {
   }
 
   async update(id: string, dto: UpdatePackageDto) {
+    // Server-side backstop, not just the "Active" switch's own client-side check -- a package
+    // with no itinerary document, or an itinerary document whose template Meta hasn't approved
+    // yet, must never actually be turned on, whichever path the request came through.
+    if (dto.isActive) {
+      const current = await this.repo.findOne(id);
+      if (!current) throw new NotFoundException('Package not found');
+      if (!current.itinerary_pdf_object_key) throw new BadRequestException('Upload the itinerary document before activating');
+      if (current.whatsapp_template_status !== 'APPROVED') throw new BadRequestException('Meta must approve this itinerary’s template before activating');
+    }
     const updated = await this.repo.update(id, dto);
     if (!updated) throw new NotFoundException('Package not found');
     return updated;

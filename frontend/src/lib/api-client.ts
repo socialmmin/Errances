@@ -1,6 +1,5 @@
 import { useAuthStore } from '@/store/auth-store';
 import { saveReturnPath } from '@/lib/return-path';
-import { getLang } from '@/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
@@ -38,7 +37,6 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'Accept-Language': getLang(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -73,5 +71,7 @@ export const api = {
     request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };

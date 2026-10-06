@@ -975,6 +975,11 @@ ALTER TABLE tour_packages ADD COLUMN IF NOT EXISTS whatsapp_template_status text
 ALTER TABLE tour_packages ADD COLUMN IF NOT EXISTS whatsapp_template_rejection_reason text;
 ALTER TABLE tour_packages ADD COLUMN IF NOT EXISTS whatsapp_template_submitted_at timestamptz;
 ALTER TABLE tour_packages ADD COLUMN IF NOT EXISTS whatsapp_template_checked_at timestamptz;
+ALTER TABLE whatsapp_automation_settings ADD COLUMN IF NOT EXISTS itinerary_template_id text;
+ALTER TABLE whatsapp_automation_settings ADD COLUMN IF NOT EXISTS itinerary_template_name text;
+ALTER TABLE whatsapp_automation_settings ADD COLUMN IF NOT EXISTS itinerary_template_status text NOT NULL DEFAULT 'NOT_SUBMITTED';
+ALTER TABLE whatsapp_automation_settings ADD COLUMN IF NOT EXISTS itinerary_template_rejection_reason text;
+ALTER TABLE whatsapp_automation_settings ADD COLUMN IF NOT EXISTS itinerary_template_checked_at timestamptz;
 CREATE TABLE IF NOT EXISTS lead_collaborators (
   lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -7,10 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useBooking, useRecordPayment, useToggleChecklistItem } from '@/hooks/use-bookings';
-import { tr, locale } from '@/i18n';
 
 function formatCurrency(n: number) {
-  return new Intl.NumberFormat(locale(), { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
 // Simplified port of hala-audit/frontend/src/pages/bookings/today-tour.tsx.
@@ -31,14 +30,14 @@ export default function TodaysTourPage() {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('cash');
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">{tr("Loading…")}</p>;
-  if (!booking) return <p className="text-sm text-muted-foreground">{tr("Booking not found.")}</p>;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!booking) return <p className="text-sm text-muted-foreground">Booking not found.</p>;
 
   const balance = Math.max(booking.total_amount - booking.paid_amount, 0);
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" size="sm" onClick={() => router.push(`/bookings/${id}`)}>{tr("← Back to Booking")}</Button>
+      <Button variant="ghost" size="sm" onClick={() => router.push(`/bookings/${id}`)}>← Back to Booking</Button>
 
       <div className="rounded-2xl bg-gradient-to-br from-navy to-navy-800 p-6 text-white">
         <p className="text-sm text-white/80">{booking.customer_name}</p>
@@ -48,40 +47,40 @@ export default function TodaysTourPage() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">{tr("Payment Status")}</CardTitle>
+          <CardTitle className="text-base">Payment Status</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-3 gap-3 text-center">
-            <div><p className="text-lg font-bold">{formatCurrency(booking.total_amount)}</p><p className="text-xs text-muted-foreground">{tr("Total")}</p></div>
-            <div><p className="text-lg font-bold text-green-600">{formatCurrency(booking.paid_amount)}</p><p className="text-xs text-muted-foreground">{tr("Received")}</p></div>
-            <div><p className={`text-lg font-bold ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(balance)}</p><p className="text-xs text-muted-foreground">{tr("Balance")}</p></div>
+            <div><p className="text-lg font-bold">{formatCurrency(booking.total_amount)}</p><p className="text-xs text-muted-foreground">Total</p></div>
+            <div><p className="text-lg font-bold text-green-600">{formatCurrency(booking.paid_amount)}</p><p className="text-xs text-muted-foreground">Received</p></div>
+            <div><p className={`text-lg font-bold ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(balance)}</p><p className="text-xs text-muted-foreground">Balance</p></div>
           </div>
           <div className="flex items-end gap-2">
             <div>
-              <Label>{tr("Amount")}</Label>
+              <Label>Amount</Label>
               <Input type="number" className="mt-1.5 w-32" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
             <div>
-              <Label>{tr("Method")}</Label>
+              <Label>Method</Label>
               <select className="mt-1.5 h-9 rounded-md border bg-background px-2 text-sm" value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="cash">{tr("Cash")}</option>
-                <option value="upi">{tr("UPI")}</option>
-                <option value="bank_transfer">{tr("Bank Transfer")}</option>
-                <option value="card">{tr("Card")}</option>
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="card">Card</option>
               </select>
             </div>
             <Button
               disabled={!amount || recordPayment.isPending}
               onClick={() => { recordPayment.mutate({ bookingId: id, amount: parseFloat(amount), method }); setAmount(''); }}
             >
-              {tr("Collect Payment")}
+              Collect Payment
             </Button>
           </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">{tr("Operational Checklist")}</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Operational Checklist</CardTitle></CardHeader>
         <CardContent className="space-y-1.5">
           {(booking.checklist ?? []).map((item) => (
             <label key={item.id} className="flex items-center gap-2 text-sm">

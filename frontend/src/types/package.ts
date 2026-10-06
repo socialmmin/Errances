@@ -205,6 +205,7 @@ export interface TourPackage {
   whatsapp_template_name: string | null;
   whatsapp_template_status: string;
   whatsapp_template_rejection_reason: string | null;
+  additional_documents?: { id: string; duration_days: number | null; duration_nights: number | null; file_name: string | null; object_key: string | null; whatsapp_template_status: string | null }[];
   branch_id: string;
   created_at: string;
   hotels?: any[];
@@ -213,4 +214,4 @@ export interface TourPackage {
   itinerary?: any[];
 }
 
-export interface PackageButton { type: 'call' | 'url' | 'chat'; text: string; phone?: string; url?: string; reply?: string; replyTouched?: boolean }
+export interface PackageButton { type: 'call' | 'url' | 'chat' | 'duration'; text: string; phone?: string; url?: string; reply?: string; replyTouched?: boolean; customLabel?: string }

@@ -13,7 +13,6 @@ import { useConfirm } from '@/components/ui/confirm-dialog';
 import { PermissionGuard } from '@/components/shared/permission-guard';
 import { PERMISSIONS } from '@/lib/permissions';
 import { useBranches, useCreateBranch, useUpdateBranch, useDeleteBranch } from '@/hooks/use-branches';
-import { tr } from '@/i18n';
 
 function AddBranchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
@@ -33,7 +32,7 @@ function AddBranchDialog({ open, onClose }: { open: boolean; onClose: () => void
   async function submit() {
     if (!name.trim()) return;
     await create.mutateAsync({ name, city: city || undefined, country: country || undefined, phone: phone || undefined, email: email || undefined });
-    toast(tr("Branch created"), 'success');
+    toast('Branch created', 'success');
     reset();
     onClose();
   }
@@ -42,17 +41,17 @@ function AddBranchDialog({ open, onClose }: { open: boolean; onClose: () => void
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <CardContent className="space-y-3 p-5">
-          <h2 className="text-lg font-semibold text-navy dark:text-white">{tr("Add Branch")}</h2>
-          <div><Label>{tr("Name *")}</Label><Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <h2 className="text-lg font-semibold text-navy dark:text-white">Add Branch</h2>
+          <div><Label>Name *</Label><Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>{tr("City")}</Label><Input className="mt-1" value={city} onChange={(e) => setCity(e.target.value)} /></div>
-            <div><Label>{tr("Country")}</Label><Input className="mt-1" value={country} onChange={(e) => setCountry(e.target.value)} /></div>
+            <div><Label>City</Label><Input className="mt-1" value={city} onChange={(e) => setCity(e.target.value)} /></div>
+            <div><Label>Country</Label><Input className="mt-1" value={country} onChange={(e) => setCountry(e.target.value)} /></div>
           </div>
-          <div><Label>{tr("Phone")}</Label><Input className="mt-1" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
-          <div><Label>{tr("Email")}</Label><Input className="mt-1" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+          <div><Label>Phone</Label><Input className="mt-1" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+          <div><Label>Email</Label><Input className="mt-1" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={onClose}>{tr("Cancel")}</Button>
-            <Button disabled={!name.trim() || create.isPending} onClick={submit}>{tr("Create Branch")}</Button>
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button disabled={!name.trim() || create.isPending} onClick={submit}>Create Branch</Button>
           </div>
         </CardContent>
       </Card>
@@ -72,30 +71,30 @@ export default function SettingsBranchesPage() {
 
   async function onDelete(id: string, name: string) {
     const ok = await confirm({
-      title: tr("Delete \"{name}\"?", { name: name }),
-      description: tr("This is a soft delete — it can be restored later."),
-      confirmLabel: tr("Delete"),
+      title: `Delete "${name}"?`,
+      description: 'This is a soft delete — it can be restored later.',
+      confirmLabel: 'Delete',
       variant: 'destructive',
     });
     if (!ok) return;
     await remove.mutateAsync(id);
-    toast(tr("Branch deleted"), 'success');
+    toast('Branch deleted', 'success');
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-navy dark:text-white">{tr("Settings — Branches")}</h1>
-          <p className="text-sm text-muted-foreground">{tr("Manage office locations")}</p>
+          <h1 className="text-2xl font-semibold text-navy dark:text-white">Settings — Branches</h1>
+          <p className="text-sm text-muted-foreground">Manage office locations</p>
         </div>
         <PermissionGuard permission={PERMISSIONS.SETTINGS_BRANCHES}>
-          <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />{' '}{tr("Add Branch")}</Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Add Branch</Button>
         </PermissionGuard>
       </div>
 
       {isLoading ? <TableSkeleton /> : !branches.length ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">{tr("No branches yet.")}</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">No branches yet.</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {branches.map((b) => (
@@ -107,17 +106,17 @@ export default function SettingsBranchesPage() {
                     <p className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {b.city ?? '—'}{b.country ? `, ${b.country}` : ''}</p>
                   </div>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${b.is_active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
-                    {b.is_active ? tr("Active") : tr("Inactive")}
+                    {b.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
                 {b.phone && <p className="flex items-center gap-1 text-xs text-muted-foreground"><Phone className="h-3 w-3" /> {b.phone}</p>}
                 <div className="flex items-center justify-between pt-2">
                   <div className="flex items-center gap-2">
                     <Switch checked={b.is_active} onCheckedChange={(v) => update.mutate({ id: b.id, isActive: v })} />
-                    <span className="text-xs text-muted-foreground">{tr("Active")}</span>
+                    <span className="text-xs text-muted-foreground">Active</span>
                   </div>
                   <PermissionGuard permission={PERMISSIONS.SETTINGS_BRANCHES}>
-                    <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete(b.id, b.name)}>{tr("Delete")}</Button>
+                    <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete(b.id, b.name)}>Delete</Button>
                   </PermissionGuard>
                 </div>
               </CardContent>

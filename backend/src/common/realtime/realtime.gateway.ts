@@ -9,6 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { PushService } from '../push/push.service';
+import { requireEnv } from '../config/require-env';
 
 @Injectable()
 @WebSocketGateway({
@@ -38,7 +39,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     try {
-      const secret = this.config.get<string>('JWT_ACCESS_SECRET') || 'dev-access-secret';
+      const secret = requireEnv(this.config, 'JWT_ACCESS_SECRET');
       const payload = this.jwt.verify(token, { secret });
       (client.data as Record<string, unknown>).user = payload;
       client.join(`user:${payload.userId}`);
@@ -112,6 +113,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   // exactly the thing that must never just sit unnoticed.
   broadcastItineraryFailed(info: { lead_id: string | null; customer_name: string; destination: string | null; reason: string | null }) {
     this.emitSafely(() => this.server.emit('itinerary_failed', info));
+  }
+
+  // A WhatsApp template (itinerary, additional document, daily report, or quotation-ready)
+  // just got its real review result from Meta -- pushed the instant our own webhook receives
+  // it, not on whatever interval an open tab's own polling timer happens to be on. The 20s
+  // client-side poll still exists as a fallback for a client that missed the socket event
+  // entirely (reconnect gap, etc), but this is what actually makes it feel instant.
+  broadcastTemplateStatusUpdate(info: { templateId: string; status: string }) {
+    this.emitSafely(() => this.server.emit('template_status_update', info));
   }
 
   broadcastNewLead(lead: Record<string, unknown>) {

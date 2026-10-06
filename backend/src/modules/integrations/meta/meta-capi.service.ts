@@ -43,6 +43,42 @@ export class MetaCapiService implements OnModuleInit {
     return { mode: s.mode, datasetId: s.dataset_id, testEventCode: s.test_event_code, events: rows, recentErrors: err };
   }
 
+  // The actual, per-lead answer to "did Meta get told about THIS lead, and does Meta say it
+  // received it" -- not an aggregate count. `status` here is our own send log (did Meta's
+  // ingestion endpoint return HTTP 200 + events_received:1 for this specific event, with Meta's
+  // own trace id in `response`) since Meta's API has no per-event read-receipt lookup; the
+  // aggregate dataset stats above are the only additional confirmation Meta itself exposes.
+  // One row per lead (not per event -- a lead can have both a "Lead" and a later "Disqualified"
+  // row; this shows only the most advanced one, since that's what actually represents the
+  // lead's current status). "received" here means our own send log shows Meta's ingestion
+  // endpoint accepted it (sent/test_sent) -- Meta exposes no per-lead read-receipt API, so this
+  // is the real, honest signal: did it reach Meta, not "did Meta separately confirm this one."
+  async eventLog(filter?: 'received' | 'not_received') {
+    const receivedWhere = filter === 'received' ? `AND x.send_status IN ('sent','test_sent')` : filter === 'not_received' ? `AND x.send_status NOT IN ('sent','test_sent')` : '';
+    const { rows } = await this.pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (e.lead_id)
+           e.id, e.lead_id, l.customer_name, l.lead_number, l.status AS crm_status,
+           COALESCE(NULLIF(regexp_replace(COALESCE(l.campaign_name,''), ' – Lead Form$', ''), ''), '(no campaign)') AS campaign_name,
+           e.event_name, e.status AS send_status, e.response, e.sent_at, e.created_at
+         FROM meta_conversion_events e JOIN leads l ON l.id = e.lead_id
+         WHERE l.is_deleted = false
+         ORDER BY e.lead_id,
+           CASE e.event_name WHEN 'Booked' THEN 6 WHEN 'AdvancePaid' THEN 5 WHEN 'QuotationSent' THEN 4 WHEN 'Qualified' THEN 3 WHEN 'Disqualified' THEN 2 WHEN 'Lead' THEN 1 ELSE 0 END DESC,
+           e.created_at DESC
+       ) x
+       WHERE 1=1 ${receivedWhere}
+       ORDER BY x.created_at DESC LIMIT 1000`,
+    );
+    return { data: rows };
+  }
+
+  async retryEvent(eventId: string) {
+    // "skipped" (no genuine Meta lead ID) isn't retryable -- retrying would just skip again.
+    await this.pool.query(`UPDATE meta_conversion_events SET status='pending', attempts=0, response=NULL WHERE id=$1 AND status='failed'`, [eventId]);
+    return { ok: true };
+  }
+
   // Actually calls Meta right now -- never a cached/stored flag. If this says connected, Meta itself
   // just confirmed the token is valid and the dataset is reachable at this moment.
   async liveConnectionCheck() {
@@ -109,21 +145,33 @@ export class MetaCapiService implements OnModuleInit {
   }
 
   private async sendOne(ev: any, s: { mode: string; dataset_id: string | null; test_event_code: string | null }) {
-    const leadDigits = String(ev.meta_leadgen_id || '').replace(/\D/g, '');
-    if (!leadDigits) return { ok: false, skipped: true, msg: 'lead has no Meta lead ID' };
+    // A real Meta lead ID is pure digits. IDs like "sheet-f13fd3b5..." are placeholders our own
+    // Excel-import path writes in so meta_leadgen_id is never null -- they were never actually
+    // given to us by Meta, so sending an event for one always gets "Invalid parameter" back (Meta
+    // has no such lead to match it to). Skip them outright instead of burning a failed attempt.
+    const rawId = String(ev.meta_leadgen_id || '');
+    if (!/^\d+$/.test(rawId)) return { ok: false, skipped: true, msg: 'Not a real Meta lead (imported from a sheet, no genuine Meta lead ID)' };
+    const leadDigits = rawId;
     if (!this.token || !s.dataset_id) return { ok: false, msg: 'Meta token or dataset is not configured' };
     const phoneDigits = String(ev.phone || '').replace(/\D/g, '');
     const local = phoneDigits.slice(-10);
     const ph = /^[6-9]\d{9}$/.test(local) ? `91${local}` : phoneDigits;
     const value = ['AdvancePaid', 'Booked'].includes(ev.event_name) ? await this.valueFor(ev.lead_id) : null;
     const at = Math.floor(new Date(ev.event_time).getTime() / 1000);
+    // Why the lead was closed, so Meta gets the reason with the Disqualified signal. Only the main
+    // reason goes (the part before " — "): the words the employee typed about the customer stay in
+    // the CRM, because Meta does not allow personal details in these fields.
+    const mainReason = ev.event_name === 'Disqualified' ? String(ev.lost_reason ?? '').split(' — ')[0].replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    const reasonData = ev.event_name === 'Disqualified'
+      ? { ...(ev.lead_status ? { lead_status: String(ev.lead_status) } : {}), ...(mainReason ? { disqualify_reason: mainReason, disqualify_reason_code: mainReason.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') } : {}) }
+      : {};
     const event: any = {
       event_name: ev.event_name,
       event_time: Math.floor(Date.now() / 1000) - at > 6 * 86400 ? Math.floor(Date.now() / 1000) : at, // Meta refuses events older than 7 days
       event_id: ev.id,
       action_source: 'system_generated',
       user_data: { lead_id: '__LEAD__', ...(ph ? { ph: [sha(ph)] } : {}), ...(ev.email ? { em: [sha(String(ev.email).trim().toLowerCase())] } : {}) },
-      custom_data: { event_source: 'crm', lead_event_source: 'Errances Voyages CRM', ...(value ? { value, currency: 'INR' } : {}) },
+      custom_data: { event_source: 'crm', lead_event_source: 'Errances Voyages CRM', ...(value ? { value, currency: 'INR' } : {}), ...reasonData },
     };
     // Meta wants the lead id as a whole number; a 16-digit id would lose precision as a JS number, so it is spliced in as text.
     const body = JSON.stringify({ data: [event], ...(s.mode === 'test' ? { test_event_code: s.test_event_code } : {}) }).replace('"__LEAD__"', leadDigits);
@@ -132,7 +180,7 @@ export class MetaCapiService implements OnModuleInit {
     });
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok || !(json.events_received >= 1)) return { ok: false, msg: json?.error?.message || `HTTP ${res.status}`, value };
-    return { ok: true, msg: `received ${json.events_received} (trace ${json.fbtrace_id})`, value };
+    return { ok: true, msg: `received ${json.events_received} (trace ${json.fbtrace_id})${mainReason ? ` · reason sent: ${mainReason}` : ''}`, value };
   }
 
   // Sends one Qualified event for a real Meta lead to Events Manager > Test events. Only works in test mode.
@@ -153,7 +201,7 @@ export class MetaCapiService implements OnModuleInit {
     this.running = true;
     try {
       const { rows } = await this.pool.query(
-        `SELECT e.id, e.lead_id, e.event_name, e.event_time, l.meta_leadgen_id, l.email,
+        `SELECT e.id, e.lead_id, e.event_name, e.event_time, l.meta_leadgen_id, l.email, l.lost_reason, l.status::text AS lead_status,
                 COALESCE(NULLIF(l.whatsapp_number,''), l.phone) AS phone
            FROM meta_conversion_events e JOIN leads l ON l.id = e.lead_id
           WHERE e.status = 'pending' AND e.attempts < 5 ORDER BY e.created_at LIMIT 50`,
@@ -234,7 +282,7 @@ export class MetaCapiService implements OnModuleInit {
     // Meta needs a working minimum of real conversion events (roughly 15-25 in a 7-day window, per
     // event) before an ad set can reliably optimize toward that event. We surface our own count
     // honestly rather than claim a number Meta hasn't confirmed.
-    const meaningfulEvents = ['Qualified', 'QuotationSent', 'AdvancePaid', 'Booked', 'Disqualified'];
+    const meaningfulEvents = ['Lead', 'Qualified', 'QuotationSent', 'AdvancePaid', 'Booked', 'Disqualified'];
     const readiness = meaningfulEvents.map((name) => ({ event: name, sentByCrm: sentByEvent[name] || 0, confirmedByMeta: metaStats.totals?.[name] || 0, readyToOptimize: (metaStats.totals?.[name] || 0) >= 15 }));
     return {
       connection: conn,
@@ -263,6 +311,7 @@ export class MetaCapiService implements OnModuleInit {
               count(*) FILTER (WHERE NOT (COALESCE(reason,'') IN ('invalid_or_missing_phone','duplicate_phone') OR st IN ('invalid_number','wrong_number','duplicate')))::int AS valid,
               count(*) FILTER (WHERE quality = 'GOOD')::int AS good,
               count(*) FILTER (WHERE quality = 'BAD')::int AS bad,
+              count(*) FILTER (WHERE quality = 'NEUTRAL')::int AS neutral,
               count(*) FILTER (WHERE rank >= 1)::int AS qualified,
               count(*) FILTER (WHERE rank >= 2)::int AS quotation,
               count(*) FILTER (WHERE rank >= 3)::int AS advance,

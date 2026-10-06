@@ -1,5 +1,11 @@
 export const QUOTATION_ITEM_CATEGORIES = [
-  'hotel', 'flight', 'transport', 'activity', 'visa', 'insurance', 'guide', 'other',
+  'package', 'hotel', 'flight', 'transport', 'activity', 'visa', 'insurance', 'guide', 'other',
+] as const;
+
+// Matches the backend's lead_source enum -- shown only when creating a new lead from the
+// quotation builder (an existing lead already has its own source).
+export const LEAD_SOURCES = [
+  'meta_ads', 'website', 'referral', 'walk_in', 'social_media', 'phone', 'whatsapp', 'agent', 'other',
 ] as const;
 
 export const QUOTATION_STATUSES = [
@@ -31,6 +37,10 @@ export interface QuotationItem {
 
 export interface Quotation {
   id: string;
+  // set once the quotation has an invoice (approved through the link, or a payment recorded)
+  invoice_id?: string | null;
+  invoice_number?: string | null;
+  paid_amount?: number;
   quotation_number: string;
   lead_id: string | null;
   customer_id: string | null;
@@ -40,6 +50,7 @@ export interface Quotation {
   travel_to: string | null;
   adults: number;
   children: number;
+  infants: number;
   total_amount: number;
   discount_amount: number;
   final_amount: number;
@@ -53,6 +64,10 @@ export interface Quotation {
   internal_notes: string | null;
   public_share_token: string | null;
   version: number;
+  // which of the customer's requirements this is for, and its place among that requirement's quotations
+  requirement_no?: number;
+  option_no?: number;
+  option_count?: number;
   branch_id: string;
   created_at: string;
   updated_at: string;
@@ -77,12 +92,18 @@ export interface QuotationItemInput {
 export interface QuotationInput {
   leadId?: string | null;
   customerId?: string | null;
+  newCustomerName?: string;
+  newCustomerPhone?: string;
+  newCustomerEmail?: string;
+  newCustomerSource?: string;
   packageId?: string | null;
+  requirementNo?: number;
   destination?: string;
   travelFrom?: string;
   travelTo?: string;
   adults?: number;
   children?: number;
+  infants?: number;
   discountPct?: number;
   gstPct?: number;
   validUntil?: string;
@@ -96,6 +117,8 @@ export interface QuotationStats {
   total_count: number;
   total_value: number;
   draft_count: number;
+  approved_unpaid_count?: number;
+  awaiting_count?: number;
 }
 
 // Margin color-coding, ported from hala-audit quotation-detail.tsx:

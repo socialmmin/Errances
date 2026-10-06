@@ -9,7 +9,6 @@ import { useToast } from '@/components/ui/toast';
 import { useCreateCustomer, useUpdateCustomer } from '@/hooks/use-customers';
 import { Customer, CustomerInput } from '@/types/customer';
 import { useAuthStore } from '@/store/auth-store';
-import { tr } from '@/i18n';
 
 export function CustomerForm({ customer }: { customer?: Customer }) {
   const router = useRouter();
@@ -40,21 +39,21 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
     try {
       if (isEdit) {
         await updateMutation.mutateAsync(payload);
-        toast(tr("Customer updated"), 'success');
+        toast('Customer updated', 'success');
       } else {
         await createMutation.mutateAsync(payload);
-        toast(tr("Customer created"), 'success');
+        toast('Customer created', 'success');
       }
       router.push('/customers');
     } catch (err: any) {
-      toast(err.message || tr("Failed to save customer"), 'error');
+      toast(err.message || 'Failed to save customer', 'error');
     }
   }
 
   return (
     <form onSubmit={onSubmit} className="max-w-xl space-y-4">
       <div className="space-y-1">
-        <Label htmlFor="fullName">{tr("Full Name")}</Label>
+        <Label htmlFor="fullName">Full Name</Label>
         <Input
           id="fullName"
           required
@@ -64,7 +63,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <Label htmlFor="phone">{tr("Phone")}</Label>
+          <Label htmlFor="phone">Phone</Label>
           <Input
             id="phone"
             value={form.phone}
@@ -72,7 +71,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="email">{tr("Email")}</Label>
+          <Label htmlFor="email">Email</Label>
           <Input
             id="email"
             type="email"
@@ -83,7 +82,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <Label htmlFor="city">{tr("City")}</Label>
+          <Label htmlFor="city">City</Label>
           <Input
             id="city"
             value={form.city}
@@ -91,7 +90,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="country">{tr("Country")}</Label>
+          <Label htmlFor="country">Country</Label>
           <Input
             id="country"
             value={form.country}
@@ -100,7 +99,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
         </div>
       </div>
       <div className="space-y-1">
-        <Label htmlFor="type">{tr("Type")}</Label>
+        <Label htmlFor="type">Type</Label>
         <select
           id="type"
           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -108,17 +107,17 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
           onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
         >
           {['individual', 'corporate', 'agent'].map((t) => (
-            <option key={t} value={t}>{tr(t)}</option>
+            <option key={t} value={t}>{t}</option>
           ))}
         </select>
       </div>
 
       <div className="flex gap-2">
         <Button type="submit" variant="gold" disabled={saving}>
-          {saving ? tr("Saving…") : isEdit ? tr("Save changes") : tr("Create customer")}
+          {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create customer'}
         </Button>
         <Button type="button" variant="outline" onClick={() => router.push('/customers')}>
-          {tr("Cancel")}
+          Cancel
         </Button>
       </div>
     </form>

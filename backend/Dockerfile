@@ -1,4 +1,4 @@
-# ErranceVoyages_Tourism_2026 — backend Dockerfile
+# ErranceVoyages_Tourism_2026 â€” backend Dockerfile
 # Build context is the REPOSITORY ROOT (Coolify: base directory "/", Dockerfile "/backend/Dockerfile"),
 # so the SQL in database/ ships with the image and the bootstrap script can create/migrate the DB on start.
 # Multi-stage build: NestJS build -> slim node:20-alpine runtime.

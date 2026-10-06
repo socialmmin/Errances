@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { LeadAccess, LeadsRepository } from './leads.repository';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
@@ -42,6 +42,10 @@ export class LeadsService {
       ids: params.ids,
       access,
     });
+  }
+
+  async closedWithReasons(access?: LeadAccess) {
+    return { data: await this.repo.closedWithReasons(access) };
   }
 
   findDistinctCampaigns(access?: LeadAccess) {
@@ -166,9 +170,10 @@ export class LeadsService {
     return { profilesCreated, enquiriesAdded, skipped };
   }
 
-  async bulkAssign(leadIds: string[], assignedTo: string) {
+  async bulkAssign(leadIds: string[], assignedTo: string, userId?: string) {
     if (!leadIds?.length) return { updated: 0 };
     const updated = await this.repo.bulkAssign(leadIds, assignedTo);
+    if (userId) await this.repo.stampChanges(leadIds, userId);
     return { updated };
   }
 
@@ -200,9 +205,23 @@ export class LeadsService {
   }
 
   async update(id: string, dto: UpdateLeadDto, access?: LeadAccess) {
-    await this.findOne(id, access);
+    const current: any = await this.findOne(id, access);
+    // A lead cannot be closed as Not Interested / Lost without a typed reason. Checked here, not
+    // only on the screen, so no page (or old browser tab) can skip it.
+    // Also when the lead is already closed but has no reason yet (closed before the rule): the
+    // reason is then being added afterwards and goes through the same check and note.
+    const closing = !!dto.status && ['not_interested', 'lost'].includes(dto.status) && (dto.status !== current?.status || (!String(current?.lost_reason ?? '').trim() && dto.lostReason !== undefined));
+    if (closing) {
+      const reason = String(dto.lostReason ?? '').replace(/\s+/g, ' ').trim();
+      if (reason.length < 10) throw new BadRequestException('Type the reason before marking this lead as ' + (dto.status === 'lost' ? 'Lost' : 'Not Interested'));
+      dto.lostReason = reason.slice(0, 500);
+    } else if (dto.lostReason !== undefined) {
+      dto.lostReason = String(dto.lostReason).replace(/\s+/g, ' ').trim().slice(0, 500) || undefined;
+    }
     const updated = await this.repo.update(id, dto);
     if (!updated) throw new NotFoundException('Lead not found');
+    if (access?.userId) await this.repo.stampChanges([id], access.userId);
+    if (closing) await this.repo.addClosingNote(id, `Marked ${dto.status === 'lost' ? 'Lost' : 'Not Interested'} — reason: ${dto.lostReason}`, access?.userId ?? null);
     return updated;
   }
 

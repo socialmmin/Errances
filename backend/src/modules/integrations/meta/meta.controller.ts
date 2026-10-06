@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, HttpCode, UseGuards } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { MetaService } from './meta.service';
 import { MetaCapiService } from './meta-capi.service';
@@ -6,6 +7,7 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../../common/rbac/role-permissions';
+import { RequireAccess } from '../../../common/access/access.service';
 import { WhatsAppBotService } from '../whatsapp/whatsapp-bot.service';
 
 // Public webhook endpoints called directly by Meta (Facebook/Instagram) —
@@ -22,7 +24,7 @@ export class MetaController {
 
   @Get('ad-account-summary')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.LEADS_VIEW)
+  @RequireAccess('dashboard.meta_ads')
   getAdAccountSummary() {
     return this.metaService.getAdAccountSummary();
   }
@@ -30,11 +32,13 @@ export class MetaController {
   // ---- Lead quality + conversion feedback ----
   @Get('funnel')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
   @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
   funnel() { return this.capi.funnel(); }
 
   @Get('id-coverage')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
   @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
   idCoverage() { return this.capi.idCoverage(); }
 
@@ -45,12 +49,28 @@ export class MetaController {
 
   @Get('capi')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
   @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
   capiStatus() { return this.capi.status(); }
   @Get('learning')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
   @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
   learning() { return this.capi.learningStatus(); }
+
+  // Per-lead, not aggregate: exactly which lead, which event, our own send status (Meta's
+  // HTTP response + trace id at send time -- Meta has no per-event read-receipt API, this
+  // is the real confirmation Meta's own endpoint gives us), and a way to retry a failure.
+  @Get('capi/events')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
+  @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
+  eventLog(@Query('filter') filter?: 'received' | 'not_received') { return this.capi.eventLog(filter); }
+
+  @Post('capi/events/:eventId/retry')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
+  retryEvent(@Param('eventId') eventId: string) { return this.capi.retryEvent(eventId); }
 
   @Post('capi/mode')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -69,16 +89,18 @@ export class MetaController {
 
   @Get('audiences')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
   @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
   audiences() { return this.capi.audienceCounts(); }
 
   @Get('audiences/:segment')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('meta_quality', 'reports')
   @RequirePermissions(PERMISSIONS.REPORTS_VIEW)
   async audienceCsv(@Param('segment') segment: string, @Res() res: Response) {
     const csv = await this.capi.audienceCsv(segment);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="errance-voyages-${segment}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="errances-voyages-${segment}.csv"`);
     res.send(csv);
   }
 
@@ -91,6 +113,7 @@ export class MetaController {
 
   @Get('campaign-coverage')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAccess('dashboard.coverage', 'packages')
   @RequirePermissions(PERMISSIONS.PACKAGES_VIEW)
   campaignCoverage() {
     return this.metaService.campaignCoverage();
@@ -103,6 +126,7 @@ export class MetaController {
     return this.metaService.syncRecentLeads(days ? Number(days) : 2);
   }
 
+  @SkipThrottle()
   @Get('webhook')
   verify(
     @Query('hub.mode') mode: string,
@@ -117,6 +141,7 @@ export class MetaController {
     }
   }
 
+  @SkipThrottle()
   @Post('webhook')
   @HttpCode(200)
   async receive(@Req() req: Request, @Res() res: Response) {

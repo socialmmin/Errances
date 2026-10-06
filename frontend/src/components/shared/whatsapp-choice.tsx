@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ExternalLink, MessageCircle } from 'lucide-react';
-import { tr } from '@/i18n';
 
 // Two very different jobs share the same "WhatsApp" button: replying to whatever
 // the customer just sent (that's the CRM Inbox, backed by the Cloud API number),
@@ -28,7 +27,7 @@ export function WhatsAppChoice({ leadId, phone, className, title, children }: { 
 
   return (
     <div ref={ref} className="relative inline-block">
-      <button type="button" title={title || tr("WhatsApp")} disabled={!digits} className={className} onClick={(event) => { event.stopPropagation(); if (!open && ref.current) { const b = ref.current.getBoundingClientRect(); setPos({ top: b.bottom + 4, left: Math.max(8, Math.min(b.left, window.innerWidth - 248)) }); } setOpen((v) => !v); }}>
+      <button type="button" title={title || 'WhatsApp'} disabled={!digits} className={className} onClick={(event) => { event.stopPropagation(); if (!open && ref.current) { const b = ref.current.getBoundingClientRect(); setPos({ top: b.bottom + 4, left: Math.max(8, Math.min(b.left, window.innerWidth - 248)) }); } setOpen((v) => !v); }}>
         {children}
       </button>
       {open && createPortal(
@@ -38,14 +37,14 @@ export function WhatsAppChoice({ leadId, phone, className, title, children }: { 
             className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/5"
           >
             <MessageCircle className="h-4 w-4 text-emerald-600" />
-            <span><span className="block font-medium">{tr("Open in CRM Inbox")}</span><span className="block text-xs text-slate-400">{tr("See what they last sent, reply from our number")}</span></span>
+            <span><span className="block font-medium">Open in CRM Inbox</span><span className="block text-xs text-slate-400">See what they last sent, reply from our number</span></span>
           </button>
           <button
             onClick={() => { setOpen(false); window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer'); }}
             className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/5"
           >
             <ExternalLink className="h-4 w-4 text-slate-500" />
-            <span><span className="block font-medium">{tr("Open WhatsApp Web")}</span><span className="block text-xs text-slate-400">{tr("Send manually from your personal number")}</span></span>
+            <span><span className="block font-medium">Open WhatsApp Web</span><span className="block text-xs text-slate-400">Send manually from your personal number</span></span>
           </button>
         </div>,
         document.body,

@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { ChevronDown, HelpCircle } from 'lucide-react';
-import { tr } from '@/i18n';
 
 interface Row { status: string; when: string; example: string }
 const GOOD: Row[] = [
@@ -33,8 +32,8 @@ function Table({ rows, tone }: { rows: Row[]; tone: string }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full text-left text-xs">
-        <thead className={`${tone} text-[11px] uppercase tracking-wide`}><tr><th className="px-3 py-1.5">{tr("Status")}</th><th className="px-3 py-1.5">{tr("When to use it")}</th><th className="px-3 py-1.5">{tr("Example")}</th></tr></thead>
-        <tbody>{rows.map((r) => <tr key={r.status} className="border-t border-border align-top"><td className="whitespace-nowrap px-3 py-2 font-semibold">{tr(r.status)}</td><td className="px-3 py-2 text-muted-foreground">{r.when}</td><td className="px-3 py-2 italic text-muted-foreground">{r.example}</td></tr>)}</tbody>
+        <thead className={`${tone} text-[11px] uppercase tracking-wide`}><tr><th className="px-3 py-1.5">Status</th><th className="px-3 py-1.5">When to use it</th><th className="px-3 py-1.5">Example</th></tr></thead>
+        <tbody>{rows.map((r) => <tr key={r.status} className="border-t border-border align-top"><td className="whitespace-nowrap px-3 py-2 font-semibold">{r.status}</td><td className="px-3 py-2 text-muted-foreground">{r.when}</td><td className="px-3 py-2 italic text-muted-foreground">{r.example}</td></tr>)}</tbody>
       </table>
     </div>
   );
@@ -47,30 +46,30 @@ export function StatusGuide({ defaultOpen = false }: { defaultOpen?: boolean }) 
   return (
     <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 px-5 py-3.5 text-left">
-        <span className="flex items-center gap-2 font-bold text-navy dark:text-white"><HelpCircle className="h-4 w-4 text-gold" />{tr("Status guide — what each one means, and what it does")}</span>
+        <span className="flex items-center gap-2 font-bold text-navy dark:text-white"><HelpCircle className="h-4 w-4 text-gold" />Status guide — what each one means, and what it does</span>
         <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div className="space-y-4 border-t border-border px-5 pb-5 pt-4 text-sm">
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />{tr("Good — sent to Meta, tells it \"find more people like this\"")}</p>
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />Good — sent to Meta, tells it "find more people like this"</p>
             <Table rows={GOOD} tone="bg-emerald-50 text-emerald-800" />
           </div>
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-600"><span className="h-2 w-2 rounded-full bg-slate-400" />{tr("Neutral — normal in-progress work, not reported to Meta yet")}</p>
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-600"><span className="h-2 w-2 rounded-full bg-slate-400" />Neutral — normal in-progress work, not reported to Meta yet</p>
             <Table rows={NEUTRAL} tone="bg-slate-100 text-slate-700" />
           </div>
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase text-red-700"><span className="h-2 w-2 rounded-full bg-red-500" />{tr("Bad — never sent to Meta as a success; feeds the exclusion list")}</p>
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase text-red-700"><span className="h-2 w-2 rounded-full bg-red-500" />Bad — never sent to Meta as a success; feeds the exclusion list</p>
             <Table rows={BAD} tone="bg-red-50 text-red-800" />
           </div>
           <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">{tr("Automatic (you never need to set these by hand):")}</p>
+            <p className="font-semibold text-foreground">Automatic (you never need to set these by hand):</p>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
-              <li>{tr("No phone / an invalid-looking number → tagged")}{' '}<b>{tr("Bad")}</b>{' '}{tr("automatically.")}</li>
-              <li>{tr("Same phone number as an earlier lead → tagged")}{' '}<b>{tr("Bad")}</b>{' '}{tr("(duplicate) automatically.")}</li>
-              <li>{tr("3 unanswered follow-up attempts over 7 days with no reply → tagged")}{' '}<b>{tr("Bad")}</b>{' '}{tr("automatically.")}</li>
-              <li>{tr("You can always override the automatic tag on a lead's own page if it got it wrong.")}</li>
+              <li>No phone / an invalid-looking number → tagged <b>Bad</b> automatically.</li>
+              <li>Same phone number as an earlier lead → tagged <b>Bad</b> (duplicate) automatically.</li>
+              <li>3 unanswered follow-up attempts over 7 days with no reply → tagged <b>Bad</b> automatically.</li>
+              <li>You can always override the automatic tag on a lead's own page if it got it wrong.</li>
             </ul>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { PG_POOL } from '../../common/db/pool.module';
+import { PERMISSIONS, roleHasPermission } from '../../common/rbac/role-permissions';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { CreateRequirementDto } from './dto/create-requirement.dto';
@@ -62,7 +63,7 @@ export class LeadsRepository {
     }
     if (params.search) {
       values.push(`%${params.search}%`);
-      conditions.push(`(l.customer_name ILIKE $${values.length} OR l.phone ILIKE $${values.length} OR l.email ILIKE $${values.length})`);
+      conditions.push(`(l.customer_name ILIKE $${values.length} OR l.phone ILIKE $${values.length} OR l.whatsapp_number ILIKE $${values.length} OR l.email ILIKE $${values.length} OR l.destination ILIKE $${values.length} OR l.campaign_name ILIKE $${values.length} OR l.lead_number ILIKE $${values.length})`);
     }
     if (params.noPhone) conditions.push(`COALESCE(NULLIF(l.phone,''), NULLIF(l.whatsapp_number,'')) IS NULL`);
     // Used to pull specific leads (e.g. every unread WhatsApp chat) regardless of where they'd
@@ -124,7 +125,9 @@ export class LeadsRepository {
     const offsetIdx = values.length;
 
     const { rows } = await this.pool.query(
-      `SELECT l.*, (SELECT v.quality FROM lead_quality_v v WHERE v.lead_id = l.id) AS quality, u.full_name AS assigned_to_name, ${leadDateSql} AS lead_date, it.itinerary_status${sortByActivity ? ', wm.last_message_at' : ''}
+      `SELECT l.*, (SELECT v.quality FROM lead_quality_v v WHERE v.lead_id = l.id) AS quality, u.full_name AS assigned_to_name, ${leadDateSql} AS lead_date, it.itinerary_status,
+              -- has the customer written back on WhatsApp, and when last
+              (SELECT max(m.created_at) FROM whatsapp_messages m WHERE m.lead_id = l.id AND m.direction = 'in') AS last_reply_at${sortByActivity ? ', wm.last_message_at' : ''}
        FROM leads l
        LEFT JOIN users u ON u.id = l.assigned_to
        LEFT JOIN LATERAL (
@@ -192,6 +195,23 @@ export class LeadsRepository {
     const total = rows[0]?.total ?? 0;
     const sent = rows[0]?.sent ?? 0;
     return { campaign: campaignName, total, sent, notSent: total - sent };
+  }
+
+  // Every lead closed as Not Interested / Lost with its reason, who marked it and when.
+  async closedWithReasons(access?: LeadAccess) {
+    const values: any[] = [];
+    const accessSql = this.accessSql(access, values);
+    const { rows } = await this.pool.query(
+      `SELECT l.id, l.customer_name, l.phone, l.destination, l.status::text AS status, l.lost_reason, l.campaign_name, u.full_name AS assigned_name,
+              COALESCE(ch.created_at, l.updated_at) AS closed_at, cu.full_name AS closed_by
+         FROM leads l
+         LEFT JOIN users u ON u.id = l.assigned_to
+         LEFT JOIN LATERAL (SELECT c.created_at, c.changed_by FROM lead_changes c WHERE c.lead_id = l.id AND c.field = 'status' AND c.new_value = l.status::text ORDER BY c.created_at DESC LIMIT 1) ch ON true
+         LEFT JOIN users cu ON cu.id::text = ch.changed_by::text
+        WHERE l.is_deleted = false AND l.status IN ('not_interested', 'lost') ${accessSql}
+        ORDER BY COALESCE(ch.created_at, l.updated_at) DESC LIMIT 3000`, values,
+    );
+    return rows;
   }
 
   async findDistinctCampaigns(access?: LeadAccess) {
@@ -287,6 +307,14 @@ export class LeadsRepository {
        WHERE l.is_deleted = false ${accessSql}`, values,
     );
     return rows[0];
+  }
+
+  // The database trigger has just recorded what changed on these leads; this adds who did it.
+  async stampChanges(leadIds: string[], userId: string) {
+    await this.pool.query(
+      `UPDATE lead_changes SET changed_by = $2 WHERE lead_id = ANY($1::uuid[]) AND changed_by IS NULL AND created_at > now() - interval '10 seconds'`,
+      [leadIds, userId],
+    ).catch(() => undefined);
   }
 
   async bulkAssign(leadIds: string[], assignedTo: string) {
@@ -427,6 +455,11 @@ export class LeadsRepository {
     return rows[0] || null;
   }
 
+  // The reason a lead was closed, kept on its Notes tab with who marked it and when.
+  async addClosingNote(leadId: string, body: string, userId: string | null) {
+    await this.pool.query(`INSERT INTO lead_notes (lead_id, body, created_by) VALUES ($1, $2, $3)`, [leadId, body, userId]).catch(() => undefined);
+  }
+
   async update(id: string, dto: UpdateLeadDto) {
     const fieldMap: Record<string, any> = {
       customer_name: dto.customerName,
@@ -446,6 +479,7 @@ export class LeadsRepository {
       assigned_to: dto.assignedTo,
       priority: dto.priority,
       status: dto.status,
+      lost_reason: dto.lostReason,
       expected_revenue: dto.expectedRevenue,
       remarks: dto.remarks,
       whatsapp_contact_id: dto.whatsappContactId,
@@ -504,12 +538,15 @@ export class LeadsRepository {
     try {
       await client.query('BEGIN');
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`lead-round-robin:${branchId}`]);
-      const { rows: users } = await client.query(
-        `SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id
+      // Eligibility comes from the role permission map in code (roles.permissions in the DB is an
+      // unused placeholder, empty for every role -- checking it meant nobody was ever picked).
+      const { rows: candidates } = await client.query(
+        `SELECT u.id, r.name AS role_name FROM users u JOIN roles r ON r.id=u.role_id
          WHERE u.is_active=true AND u.is_deleted=false AND u.participate_round_robin=true AND u.branch_id=$1
-           AND r.name <> 'super_admin' AND r.permissions ? 'leads:view'
+           AND r.name <> 'super_admin'
          ORDER BY u.created_at,u.id`, [branchId],
       );
+      const users = candidates.filter((u: any) => roleHasPermission(u.role_name, PERMISSIONS.LEADS_VIEW));
       if (!users.length) { await client.query('COMMIT'); return null; }
       const { rows: state } = await client.query(`SELECT last_user_id FROM lead_assignment_state WHERE branch_id=$1`, [branchId]);
       const previous = users.findIndex((user) => user.id === state[0]?.last_user_id);

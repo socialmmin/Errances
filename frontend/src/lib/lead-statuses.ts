@@ -1,5 +1,3 @@
-import { tr } from '@/i18n';
-
 export const LEAD_STATUSES = [
   { value: 'new', label: 'New' },
   { value: 'contacted', label: 'Contacted' },
@@ -21,8 +19,8 @@ export const LEAD_STATUSES = [
 ] as const;
 
 export function leadStatusLabel(value: string) {
-  return tr(LEAD_STATUSES.find((status) => status.value === value)?.label
-    ?? value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()));
+  return LEAD_STATUSES.find((status) => status.value === value)?.label
+    ?? value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 // One status field, grouped by outcome, instead of a separate status + quality + lost-reason set of

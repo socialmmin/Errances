@@ -9,7 +9,6 @@ import { PackageForm } from '@/components/packages/package-form';
 import { PermissionGuard } from '@/components/shared/permission-guard';
 import { PERMISSIONS } from '@/lib/permissions';
 import { Skeleton } from '@/components/ui/skeleton';
-import { tr } from '@/i18n';
 
 export default function PackageDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,19 +20,19 @@ export default function PackageDetailPage() {
 
   async function onDelete() {
     const ok = await confirm({
-      title: tr("Delete this package?"),
-      description: tr("This is a soft delete — it can be restored by a super admin."),
-      confirmLabel: tr("Delete"),
+      title: 'Delete this package?',
+      description: 'This is a soft delete — it can be restored by a super admin.',
+      confirmLabel: 'Delete',
       variant: 'destructive',
     });
     if (!ok) return;
     await deleteMutation.mutateAsync(id);
-    toast(tr("Package deleted"), 'success');
+    toast('Package deleted', 'success');
     router.push('/packages');
   }
 
   if (isLoading) return <Skeleton className="h-64 w-full max-w-xl" />;
-  if (!pkg) return <p>{tr("Package not found.")}</p>;
+  if (!pkg) return <p>Package not found.</p>;
 
   return (
     <div className="space-y-4">
@@ -43,7 +42,7 @@ export default function PackageDetailPage() {
         </h1>
         <PermissionGuard permission={PERMISSIONS.PACKAGES_DELETE}>
           <Button variant="destructive" size="sm" onClick={onDelete}>
-            {tr("Delete")}
+            Delete
           </Button>
         </PermissionGuard>
       </div>

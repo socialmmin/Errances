@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { QuotationsService } from './quotations.service';
 
 // No auth guards -- this is the customer-facing link shared via WhatsApp.
@@ -10,5 +10,10 @@ export class PublicQuotationsController {
   @Get(':token')
   findByToken(@Param('token') token: string) {
     return this.quotationsService.findByShareToken(token);
+  }
+
+  @Post(':token/approve')
+  approve(@Param('token') token: string, @Body() body: { signature?: string }) {
+    return this.quotationsService.approveByToken(token, body?.signature ?? null);
   }
 }

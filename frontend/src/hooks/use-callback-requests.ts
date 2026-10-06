@@ -9,8 +9,9 @@ export interface CallbackRequest {
   outcome: string | null; note: string | null;
 }
 
-export function useCallbackRequests() {
+export function useCallbackRequests(opts: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: ['callback-requests'],
     queryFn: () => api.get<{ data: CallbackRequest[] }>('/callback-requests'),
     refetchInterval: 30000,

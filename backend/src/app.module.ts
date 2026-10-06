@@ -1,6 +1,11 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { AuditedThrottlerGuard } from './common/guards/audited-throttler.guard';
 import { PoolModule } from './common/db/pool.module';
+import { AuditModule } from './common/audit/audit.module';
+import { AccessModule } from './common/access/access.service';
 import { R2Module } from './common/r2/r2.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -24,7 +29,12 @@ import { DailyReportModule } from './modules/reporting/daily-report.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Generous global default (every route was previously completely unthrottled) -- stricter,
+    // endpoint-specific limits (login, WhatsApp send) are applied with @Throttle on top of this.
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 300 }]),
     PoolModule,
+    AuditModule,
+    AccessModule,
     R2Module,
     AuthModule,
     UsersModule,
@@ -45,5 +55,6 @@ import { DailyReportModule } from './modules/reporting/daily-report.module';
     WhatsAppBotModule,
     DailyReportModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: AuditedThrottlerGuard }],
 })
 export class AppModule {}

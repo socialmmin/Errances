@@ -1,5 +1,9 @@
 'use client';
 
+import { useQuotationStats } from '@/hooks/use-quotations';
+import { useInvoices, usePaymentReminders } from '@/hooks/use-finance';
+import { BellRing, Store, Wallet } from 'lucide-react';
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -8,11 +12,11 @@ import {
   Users,
   MapPinned,
   FileText,
-  Wallet,
   BarChart3,
   CalendarClock,
   MessageCircle,
   Settings,
+  Plane,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
@@ -20,29 +24,34 @@ import {
   Target,
   MessageCircleWarning,
   PhoneCall,
+  Receipt,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
-import { useT } from '@/i18n/provider';
-import { tr } from '@/i18n';
-import type { TranslationKey } from '@/i18n/en';
 import { useBranding } from '@/components/branding-provider';
 import { useCallbackRequests } from '@/hooks/use-callback-requests';
 import { useAllFollowUps } from '@/hooks/use-follow-ups';
+import { useLeadStats } from '@/hooks/use-leads';
+import { useWhatsAppHealth } from '@/hooks/use-whatsapp';
 import { useFailedItineraries, useInboxState } from '@/hooks/use-whatsapp';
+import { useCampaignCoverage } from '@/hooks/use-packages';
+import { useMyAccess } from '@/hooks/use-access';
 
-export const NAV_ITEMS: { href: string; label: TranslationKey; icon: typeof LayoutDashboard }[] = [
-  { href: '/dashboard', label: 'nav.dashboard', icon: LayoutDashboard },
-  { href: '/leads', label: 'nav.leads', icon: Users },
-  { href: '/packages', label: 'nav.packages', icon: MapPinned },
-  { href: '/quotations', label: 'nav.quotations', icon: FileText },
-  { href: '/whatsapp', label: 'nav.whatsapp', icon: MessageCircle },
-  { href: '/finance', label: 'nav.finance', icon: Wallet },
-  { href: '/reports', label: 'nav.reports', icon: BarChart3 },
-  { href: '/meta-quality', label: 'nav.metaQuality', icon: Target },
-  { href: '/callback-requests', label: 'nav.callbacks', icon: PhoneCall },
-  { href: '/followups', label: 'nav.followups', icon: CalendarClock },
-  { href: '/failed-whatsapp', label: 'nav.failedWhatsapp', icon: MessageCircleWarning },
+export const NAV_ITEMS = [
+  { href: '/dashboard', access: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/leads', access: 'leads', label: 'Leads', icon: Users },
+  { href: '/packages', access: 'packages', label: 'Packages & Itinerary', icon: MapPinned },
+  { href: '/quotations', access: 'quotations', label: 'Quotations', icon: FileText },
+  { href: '/finance/invoices', access: 'invoices', label: 'Invoices', icon: Receipt },
+  { href: '/payment-reminders', access: 'invoices', label: 'Payment Reminders', icon: BellRing },
+  { href: '/vendors', access: 'invoices', label: 'Vendors', icon: Store },
+  { href: '/finance/report', access: 'invoices', label: 'Finance', icon: Wallet },
+  { href: '/whatsapp', access: 'whatsapp', label: 'WhatsApp Inbox', icon: MessageCircle },
+  { href: '/reports', access: 'reports', label: 'Reports', icon: BarChart3 },
+  { href: '/meta-quality', access: 'meta_quality', label: 'Meta Quality', icon: Target },
+  { href: '/callback-requests', access: 'callbacks', label: 'Callback Requests', icon: PhoneCall },
+  { href: '/followups', access: 'followups', label: 'Follow-ups', icon: CalendarClock },
+  { href: '/failed-whatsapp', access: 'failed_whatsapp', label: 'Failed WhatsApp', icon: MessageCircleWarning },
 ];
 
 const NAV_ORDER_KEY = 'crm-sidebar-order';
@@ -71,13 +80,25 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
   const user = useAuthStore((s) => s.user);
   const clearSession = useAuthStore((s) => s.clearSession);
   const brand = useBranding();
-  const t = useT();
-  const pendingManual = (useFailedItineraries().data?.data ?? []).filter((i) => !i.manualAt && (i.fault as string) !== 'queued').length;
-  const pendingCallbacks = (useCallbackRequests().data?.data ?? []).filter((c) => !c.called_at).length;
-  const pendingFollowUps = (useAllFollowUps({ status: 'pending' }).data?.data ?? []).length;
+  // Badges only load data for pages this person can actually open -- otherwise every page load
+  // would fire requests the server now refuses (and would leak counts for pages they cannot see).
+  const { can, isSuperAdmin } = useMyAccess();
+  const newLeads = useLeadStats().data?.new_leads ?? 0;
+  const whatsappHealth = useWhatsAppHealth().data;
+  const disconnectedCount = isSuperAdmin && whatsappHealth?.configured && (!whatsappHealth.tokenValid || !whatsappHealth.secretValid || !whatsappHealth.subscribed || whatsappHealth.inboundStale) ? 1 : 0;
+  const pendingManual = (useFailedItineraries({ enabled: can('failed_whatsapp') }).data?.data ?? []).filter((i) => !i.manualAt && (i.fault as string) !== 'queued').length;
+  const coverageGaps = useCampaignCoverage({ enabled: can('packages') }).data?.gaps.length ?? 0;
+  const pendingCallbacks = (useCallbackRequests({ enabled: can('callbacks') }).data?.data ?? []).filter((c) => !c.called_at).length;
+  // Quotations sent to a customer and still waiting for approval (approved ones are invoices).
+  const approvedQuotations = useQuotationStats({ enabled: can('quotations') }).data?.awaiting_count ?? 0;
+  // Payment reminders that are set and still to go out.
+  const openReminders = (usePaymentReminders({ enabled: can('invoices') }).data?.data ?? []).filter((r) => r.reminder_id).length;
+  // Invoices that still have a balance to collect.
+  const unpaidInvoices = (useInvoices({}, { enabled: can('invoices') }).data?.data ?? []).filter((i: any) => String(i.status) !== 'paid' && !i.cancelled_at).length;
+  const pendingFollowUps = (useAllFollowUps({ status: 'pending' }, { enabled: can('followups') }).data?.data ?? []).length;
   // Every customer message that hasn't been opened yet -- so a chat like Josh's above can never
   // just sit idle unnoticed; the sidebar itself says how many are waiting.
-  const inboxState = useInboxState().data;
+  const inboxState = useInboxState({ enabled: can('whatsapp') }).data;
   const unreadMessages = Object.values(inboxState ?? {}).reduce((sum, row) => sum + (row.unread || 0), 0);
   const initials = user?.fullName
     ?.split(' ')
@@ -108,16 +129,21 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
   }
 
   return (
-    <aside className={cn('sticky left-0 top-0 z-30 hidden h-full shrink-0 flex-col overflow-hidden border-r border-border bg-white text-navy transition-[width] duration-200 md:flex', collapsed ? 'w-20' : 'w-64')}>
-      <div className={cn('flex h-16 shrink-0 items-center border-b border-border', collapsed ? 'justify-center px-2' : 'justify-between px-4')}>
-        <div className={cn('flex min-w-0 items-center', collapsed && 'hidden')}>
-          <img src={brand.logo_url || '/brand/logo.png'} alt={brand.company_name} className="h-10 w-auto max-w-[10.25rem] object-contain" />
+    <aside className={cn('sticky left-0 top-0 z-30 hidden h-full shrink-0 flex-col overflow-clip bg-navy-950 text-white transition-[width] duration-200 md:flex', collapsed ? 'w-20' : 'w-64')}>
+      <div className={cn('flex h-16 shrink-0 items-center border-b border-white/5', collapsed ? 'justify-center px-2' : 'justify-between px-4')}>
+        <div className={cn('flex items-center gap-2', collapsed && 'hidden')}><div className={brand.logo_url ? "flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white p-0.5" : "flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-gold-400 to-gold-600 shadow-[0_0_20px_-4px_rgba(245,158,11,0.55)]"}>
+          {brand.logo_url?<img src={brand.logo_url} alt="" className="h-full w-full object-contain"/>:<Plane className="h-[1.125rem] w-[1.125rem] -rotate-45 text-navy-900" strokeWidth={2.25} />}
         </div>
-        <button type="button" onClick={onToggle} className="rounded-lg p-2 text-slate-500 hover:bg-muted hover:text-gold" title={collapsed ? t('common.showSidebar') : t('common.hideSidebar')}>{collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button>
+        <div className={cn('leading-tight', collapsed && 'hidden')}>
+          <div className="max-w-36 truncate text-sm font-bold tracking-tight text-white">{brand.company_name}</div>
+          <div className="max-w-36 truncate text-[10px] uppercase tracking-widest text-slate-500">{brand.tagline}</div>
+        </div>
+        </div>
+        <button type="button" onClick={onToggle} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-gold" title={collapsed ? 'Show sidebar' : 'Hide sidebar'}>{collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button>
       </div>
 
-      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 py-4 [scrollbar-color:#d1d5db_transparent] [scrollbar-width:thin]">
-        {navItems.map((item) => {
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 py-4 [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
+        {navItems.filter((item) => can(item.access)).map((item) => {
           const active = pathname.startsWith(item.href);
           const Icon = item.icon;
           return (
@@ -125,32 +151,37 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
               key={item.href}
               onDragOver={(event) => { if (dragHref) { event.preventDefault(); reorder(item.href); } }}
               onDrop={(event) => event.preventDefault()}
-              className={cn('group relative flex items-center rounded-lg transition-all', dragHref === item.href && 'opacity-40', active ? 'bg-gold shadow-[0_8px_20px_-10px_rgba(217,30,42,.7)]' : 'hover:bg-muted')}
+              className={cn('group relative flex items-center rounded-lg transition-all', dragHref === item.href && 'opacity-40', active ? 'bg-gold shadow-[0_8px_20px_-10px_rgba(245,158,11,.9)]' : 'hover:bg-white/5')}
             >
               <Link
                 href={item.href}
                 draggable={false}
-                className={cn('flex flex-1 items-center rounded-lg py-2.5 text-sm font-medium', collapsed ? 'justify-center px-2' : 'gap-3 px-3', active ? 'text-white' : 'text-slate-600 group-hover:text-navy')}
+                className={cn('flex flex-1 items-center rounded-lg py-2.5 text-sm font-medium', collapsed ? 'justify-center px-2' : 'gap-3 px-3', active ? 'text-navy' : 'text-slate-400 group-hover:text-slate-100')}
               >
                 <Icon
                   className={cn(
                     'h-[1.125rem] w-[1.125rem] shrink-0 transition-colors',
-                    active ? 'text-white' : 'text-slate-500 group-hover:text-gold',
+                    active ? 'text-navy' : 'text-slate-500 group-hover:text-slate-300',
                   )}
                 />
-                {!collapsed && <span className="truncate">{t(item.label)}</span>}
-                {item.href === '/whatsapp' && unreadMessages > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{unreadMessages}</span>}
-                {item.href === '/failed-whatsapp' && pendingManual > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{pendingManual}</span>}
-                {item.href === '/callback-requests' && pendingCallbacks > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{pendingCallbacks}</span>}
-                {item.href === '/followups' && pendingFollowUps > 0 && <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{pendingFollowUps}</span>}
+                {!collapsed && <span className="truncate">{item.label}</span>}
+                {item.href === '/leads' && <CountBadge hideZero={collapsed} n={newLeads} tone="red" />}
+                {item.href === '/whatsapp' && <CountBadge hideZero={collapsed} n={unreadMessages} tone="red" />}
+                {item.href === '/packages' && <CountBadge hideZero={collapsed} n={coverageGaps} tone="red" />}
+                {item.href === '/failed-whatsapp' && <CountBadge hideZero={collapsed} n={pendingManual} tone="red" />}
+                {item.href === '/callback-requests' && <CountBadge hideZero={collapsed} n={pendingCallbacks} tone="red" />}
+                {item.href === '/payment-reminders' && <CountBadge hideZero n={openReminders} tone="amber" />}
+                {item.href === '/finance/invoices' && <CountBadge hideZero n={unpaidInvoices} tone="amber" />}
+                {item.href === '/quotations' && <CountBadge hideZero n={approvedQuotations} tone="amber" />}
+                {item.href === '/followups' && <CountBadge hideZero={collapsed} n={pendingFollowUps} tone="amber" />}
               </Link>
               {!collapsed && (
                 <span
                   draggable
                   onDragStart={() => setDragHref(item.href)}
                   onDragEnd={() => { setDragHref(null); setNavItems((items) => { persistOrder(items); return items; }); }}
-                  title={t('common.dragToReorder')}
-                  className={cn('mr-1 shrink-0 cursor-grab touch-none rounded p-1 text-slate-500 opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100', active && 'text-white/70 hover:text-white')}
+                  title="Drag to reorder"
+                  className={cn('mr-1 shrink-0 cursor-grab touch-none rounded p-1 text-slate-500 opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100', active && 'text-navy/60 hover:text-navy')}
                 >
                   <GripVertical className="h-4 w-4" />
                 </span>
@@ -160,23 +191,31 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
         })}
       </nav>
 
-      <footer className="shrink-0 border-t border-border bg-white">
+      <footer className="shrink-0 border-t border-white/10 bg-navy-950">
       {user && (
         <div className={cn('flex items-center py-3', collapsed ? 'justify-center px-2' : 'gap-3 px-4')}>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gold-500/10 text-xs font-semibold text-gold-500 ring-1 ring-gold-500/30">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gold-500/15 text-xs font-semibold text-gold-400 ring-1 ring-gold-500/30">
             {initials || 'U'}
           </div>
           <div className={cn('min-w-0 leading-tight', collapsed && 'hidden')}>
-            <div className="truncate text-sm font-medium text-navy">{user.fullName}</div>
-            <div className="truncate text-xs capitalize text-slate-500">{tr(user.roleName.replace(/_/g, ' '))}</div>
+            <div className="truncate text-sm font-medium text-white">{user.fullName}</div>
+            <div className="truncate text-xs capitalize text-slate-500">{user.roleName.replace(/_/g, ' ')}</div>
           </div>
         </div>
       )}
       <div className="space-y-1 px-3 pb-3">
-        <Link href="/settings" title={t('common.settings')} className={cn('flex items-center rounded-lg py-2.5 text-sm text-slate-600 hover:bg-muted hover:text-gold', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><Settings className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>{t('common.settings')}</span>}</Link>
-        <button type="button" title={t('common.logout')} onClick={clearSession} className={cn('flex w-full items-center rounded-lg py-2.5 text-sm text-slate-600 hover:bg-muted hover:text-gold', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><LogOut className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>{t('common.logout')}</span>}</button>
+        {isSuperAdmin && <Link href="/settings" title="Settings" className={cn('flex items-center rounded-lg py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-gold', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><Settings className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>Settings</span>}{disconnectedCount > 0 && <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{disconnectedCount}</span>}</Link>}
+        <button type="button" title="Log out" onClick={clearSession} className={cn('flex w-full items-center rounded-lg py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-red-300', collapsed ? 'justify-center px-2' : 'gap-3 px-3')}><LogOut className="h-[1.125rem] w-[1.125rem]" />{!collapsed && <span>Log out</span>}</button>
       </div>
       </footer>
     </aside>
   );
+}
+
+// Always shown (grey at 0) so an empty count reads as "nothing waiting", not as a missing feature.
+function CountBadge({ n, tone, hideZero }: { n: number; tone: 'red' | 'amber'; hideZero?: boolean }) {
+  void hideZero;
+  if (!n) return null;
+  const cls = n > 0 ? (tone === 'red' ? 'bg-red-500 text-white' : 'bg-amber-500 text-white') : 'bg-white/10 text-slate-400';
+  return <span className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-bold ${cls}`}>{n > 999 ? '999+' : n}</span>;
 }

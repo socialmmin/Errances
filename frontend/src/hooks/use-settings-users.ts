@@ -21,7 +21,7 @@ export function useCreateSettingsUser() {
   return useMutation({
     mutationFn: (input: {
       email?: string; fullName: string; password: string; phone?: string;
-      employeeCode?: string; roleId: string; branchId: string;
+      employeeCode?: string; roleId: string; branchId?: string;
     }) => api.post<UserRow>('/users', input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings-users'] }),
   });

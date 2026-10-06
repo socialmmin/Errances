@@ -6,11 +6,12 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PERMISSIONS } from '../../common/rbac/role-permissions';
+import { BranchAccessService } from '../../common/guards/branch-access.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('tasks')
 export class TasksController {
-  constructor(private tasksService: TasksService) {}
+  constructor(private tasksService: TasksService, private branchAccess: BranchAccessService) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.TASKS_VIEW)
@@ -20,9 +21,11 @@ export class TasksController {
     @Query('assignedTo') assignedTo?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Req() req?: any,
   ) {
+    const effectiveBranchId = req?.user?.roleName === 'super_admin' ? branchId : req?.user?.branchId;
     return this.tasksService.findAll({
-      branchId,
+      branchId: effectiveBranchId,
       status,
       assignedTo,
       page: page ? parseInt(page, 10) : undefined,
@@ -32,7 +35,8 @@ export class TasksController {
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.TASKS_VIEW)
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('tasks', id, req.user);
     return this.tasksService.findOne(id);
   }
 
@@ -44,13 +48,15 @@ export class TasksController {
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.TASKS_EDIT)
-  update(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
+  async update(@Param('id') id: string, @Body() dto: UpdateTaskDto, @Req() req: any) {
+    await this.branchAccess.assertAccess('tasks', id, req.user);
     return this.tasksService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermissions(PERMISSIONS.TASKS_DELETE)
-  remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @Req() req: any) {
+    await this.branchAccess.assertAccess('tasks', id, req.user);
     return this.tasksService.remove(id);
   }
 }

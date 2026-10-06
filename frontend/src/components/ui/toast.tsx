@@ -3,7 +3,6 @@
 import * as React from 'react';
 import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { tr } from '@/i18n';
 
 interface ToastItem {
   id: number;
@@ -118,11 +117,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className="h-4 w-4" />
                 </div>
-                <p className="flex-1 pt-0.5 text-sm font-medium leading-snug text-slate-100">{tr(t.message)}</p>
+                <p className="flex-1 pt-0.5 text-sm font-medium leading-snug text-slate-100">{t.message}</p>
                 <button
                   onClick={() => dismiss(t.id)}
                   className="mt-0.5 shrink-0 text-slate-500 transition-colors hover:text-slate-200"
-                  aria-label={tr("Dismiss")}
+                  aria-label="Dismiss"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

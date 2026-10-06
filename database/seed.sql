@@ -15,8 +15,8 @@
 
 INSERT INTO branches (id, name, city, country, phone, email, is_active)
 VALUES (
-  'a1b2c3d4-0000-4000-8000-000000000001',
-  'Head Office',
+  '00000000-0000-0000-0000-000000000001',
+  'Errances Head Office',
   'Tiruchirappalli',
   'India',
   '+91-0000000000',
@@ -40,15 +40,15 @@ INSERT INTO roles (name, permissions, description) VALUES
 -- Password: ChangeMe123! (bcrypt cost 10) — rotate immediately.
 INSERT INTO users (id, email, password_hash, full_name, employee_code, role_id, branch_id, is_active)
 SELECT
-  'a1b2c3d4-0000-4000-8000-000000000002',
+  '00000000-0000-0000-0000-000000000002',
   'admin@errance.example',
   '$2b$10$NoAPKMc/0jfaNcKp5qhq..Bk6OINk0Q7I6TRNXb4CuFDQme9Spjzi',
   'Super Admin',
   'EMP-0001',
   r.id,
-  'a1b2c3d4-0000-4000-8000-000000000001',
+  '00000000-0000-0000-0000-000000000001',
   true
 FROM roles r WHERE r.name = 'super_admin';
 
-UPDATE branches SET manager_id = 'a1b2c3d4-0000-4000-8000-000000000002'
-WHERE id = 'a1b2c3d4-0000-4000-8000-000000000001';
+UPDATE branches SET manager_id = '00000000-0000-0000-0000-000000000002'
+WHERE id = '00000000-0000-0000-0000-000000000001';

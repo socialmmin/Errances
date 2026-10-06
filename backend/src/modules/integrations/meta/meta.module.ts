@@ -6,10 +6,12 @@ import { LeadsModule } from '../../leads/leads.module';
 import { RealtimeModule } from '../../../common/realtime/realtime.module';
 import { WhatsAppBotModule } from '../whatsapp/whatsapp-bot.module';
 import { PushModule } from '../../../common/push/push.module';
+import { R2Module } from '../../../common/r2/r2.module';
+import { ConnectionsHealthController } from './connections-health.controller';
 
 @Module({
-  imports: [LeadsModule, RealtimeModule, WhatsAppBotModule, PushModule],
-  controllers: [MetaController],
+  imports: [LeadsModule, RealtimeModule, WhatsAppBotModule, PushModule, R2Module],
+  controllers: [MetaController, ConnectionsHealthController],
   providers: [MetaService, MetaCapiService],
   exports: [MetaService, MetaCapiService],
 })

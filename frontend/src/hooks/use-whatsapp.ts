@@ -86,7 +86,12 @@ export function useSubmitItineraryTemplate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (packageId: string) => api.post<import('@/types/package').TourPackage>(`/integrations/whatsapp/packages/${packageId}/template/submit`, {}),
-    onSuccess: (_, id) => qc.invalidateQueries({ queryKey: ['packages', id] }),
+    // Invalidating only ['packages', id] left every OTHER view of this package stale -- the
+    // Itinerary Library table and the "Itineraries for this campaign" sibling list both read
+    // from the broader ['packages', params] list query, which has a different key and was never
+    // refetched, so they kept showing "Not submitted" even once this package's own detail view
+    // (reading ['packages', id] directly) correctly showed "In review".
+    onSuccess: (_, id) => { qc.invalidateQueries({ queryKey: ['packages'] }); qc.invalidateQueries({ queryKey: ['packages', id] }); },
   });
 }
 
@@ -94,7 +99,25 @@ export function useSyncItineraryTemplate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (packageId: string) => api.post<import('@/types/package').TourPackage>(`/integrations/whatsapp/packages/${packageId}/template/sync`, {}),
-    onSuccess: (_, id) => qc.invalidateQueries({ queryKey: ['packages', id] }),
+    onSuccess: (_, id) => { qc.invalidateQueries({ queryKey: ['packages'] }); qc.invalidateQueries({ queryKey: ['packages', id] }); },
+  });
+}
+
+// Additional itinerary documents ("Add another") -- each one's own template, keyed by document id.
+export function useSubmitDocumentTemplate(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (documentId: string) => api.post<import('@/hooks/use-packages').PackageDocument & { meta_details?: any }>(`/integrations/whatsapp/documents/${documentId}/template/submit`, {}),
+    // Same reasoning as useSubmitItineraryTemplate -- the Itinerary Library list and campaign
+    // sibling list both read from ['packages', params], not ['packages', packageId, 'documents'].
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['packages'] }); qc.invalidateQueries({ queryKey: ['packages', packageId, 'documents'] }); },
+  });
+}
+export function useSyncDocumentTemplate(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (documentId: string) => api.post<import('@/hooks/use-packages').PackageDocument & { meta_details?: any }>(`/integrations/whatsapp/documents/${documentId}/template/sync`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['packages'] }); qc.invalidateQueries({ queryKey: ['packages', packageId, 'documents'] }); },
   });
 }
 
@@ -148,6 +171,7 @@ export interface WhatsAppHealth {
   secretSource: 'crm' | 'server' | null; secretValid: boolean; subscribed: boolean;
   inboundCount: number; lastInboundAt: string | null; lastRejectedAt: string | null;
   qualityRating: 'GREEN' | 'YELLOW' | 'RED' | null; throughputTier: string | null;
+  recentOutboundCount: number; inboundStale: boolean;
 }
 
 export function useWhatsAppHealth() {
@@ -166,6 +190,8 @@ export interface PackageDelivery {
   campaign: string | null; destination: string | null; isActive: boolean; templateStatus: string;
   liveMode: boolean; testNumbers: string[]; total: number; sent: number; pending: number; noPhone: number;
   leads: { id: string; name: string; phone: string | null; enquiry: string; sent: boolean; sentAt: string | null; validPhone: boolean }[];
+  stuckCount: number; throttled: boolean; autoPaused: boolean; autoPausedAt: string | null;
+  primaryLabel: string; additionalDocuments: { id: string; label: string; sent: number; total: number }[];
 }
 
 export function fetchPackageDelivery(packageId: string) {
@@ -213,8 +239,8 @@ export function useMarkManualSent() {
   });
 }
 
-export function useFailedItineraries() {
-  return useQuery({ queryKey: ['whatsapp', 'failed-sends'], queryFn: () => api.get<{ data: FailedItinerary[]; total: number }>('/integrations/whatsapp/failed-sends'), refetchInterval: 20000 });
+export function useFailedItineraries(opts: { enabled?: boolean } = {}) {
+  return useQuery({ enabled: opts.enabled ?? true, queryKey: ['whatsapp', 'failed-sends'], queryFn: () => api.get<{ data: FailedItinerary[]; total: number }>('/integrations/whatsapp/failed-sends'), refetchInterval: 20000 });
 }
 
 export function useRetryAllFailed() {
@@ -230,8 +256,8 @@ export interface WhatsAppBilling {
   byCategory: { category: string; volume: number; cost: number }[]; days: { date: string; volume: number; cost: number }[]; updatedAt: string;
 }
 
-export function useWhatsAppBilling() {
-  return useQuery({ queryKey: ['whatsapp', 'billing'], queryFn: () => api.get<WhatsAppBilling>('/integrations/whatsapp/billing-summary'), refetchInterval: 5 * 60 * 1000, retry: false });
+export function useWhatsAppBilling(opts: { enabled?: boolean } = {}) {
+  return useQuery({ enabled: opts.enabled ?? true, queryKey: ['whatsapp', 'billing'], queryFn: () => api.get<WhatsAppBilling>('/integrations/whatsapp/billing-summary'), refetchInterval: 5 * 60 * 1000, retry: false });
 }
 
 export interface CoverageLead { id: string; name: string; createdAt: string; destination: string | null; campaign: string | null; source: string | null; phone: string | null }
@@ -292,10 +318,11 @@ export function useUpdateWhatsAppRates() {
 
 // ---- Inbox: unread, open/waiting/done, quick replies, star, re-open ----
 export type ChatStatus = 'open' | 'waiting' | 'done';
-export interface InboxStateRow { lead_id: string; status: ChatStatus; unread: number; last_body: string | null; last_direction: 'in' | 'out' | null; last_type: string | null; last_at: string | null }
+export interface InboxStateRow { lead_id: string; status: ChatStatus; unread: number; needs_reply?: boolean; last_body: string | null; last_direction: 'in' | 'out' | null; last_type: string | null; last_at: string | null }
 
-export function useInboxState() {
+export function useInboxState(opts: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: ['whatsapp', 'inbox-state'],
     queryFn: () => api.get<{ data: InboxStateRow[] }>('/integrations/whatsapp/inbox-state'),
     refetchInterval: 10000,

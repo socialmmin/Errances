@@ -55,9 +55,10 @@ export class ReportsRepository {
 
   async lostReasons(branchId?: string) {
     const args: any[] = [];
-    const cond = `l.is_deleted = false AND l.status = 'lost'${this.branchFilter(branchId, 'l.branch_id', args)}`;
+    // Not Interested and Lost both count. A typed reason is stored as "Category — details"; group by the category.
+    const cond = `l.is_deleted = false AND l.status IN ('lost', 'not_interested')${this.branchFilter(branchId, 'l.branch_id', args)}`;
     const { rows } = await this.pool.query(
-      `SELECT COALESCE(NULLIF(l.lost_reason, ''), 'Not specified') AS name, COUNT(*) AS value
+      `SELECT COALESCE(NULLIF(trim(split_part(l.lost_reason, ' — ', 1)), ''), 'Not specified') AS name, COUNT(*) AS value
          FROM leads l WHERE ${cond} GROUP BY 1 ORDER BY value DESC`,
       args,
     );

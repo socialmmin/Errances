@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect } from 'react';
-import { tr } from '@/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
@@ -26,11 +25,11 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 p-6 text-center">
-      <h1 className="text-lg font-bold text-navy">{tr("Something went wrong on this page")}</h1>
-      <p className="max-w-md text-sm text-slate-500">{tr("This has been reported. You can try again, or go back to the dashboard.")}</p>
+      <h1 className="text-lg font-bold text-navy">Something went wrong on this page</h1>
+      <p className="max-w-md text-sm text-slate-500">This has been reported. You can try again, or go back to the dashboard.</p>
       <div className="flex gap-3">
-        <button type="button" onClick={reset} className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy">{tr("Try again")}</button>
-        <a href="/dashboard" className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">{tr("Go to Dashboard")}</a>
+        <button type="button" onClick={reset} className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy">Try again</button>
+        <a href="/dashboard" className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">Go to Dashboard</a>
       </div>
     </div>
   );

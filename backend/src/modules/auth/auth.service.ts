@@ -5,6 +5,8 @@ import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import { PG_POOL } from '../../common/db/pool.module';
+import { requireEnv } from '../../common/config/require-env';
+import { AuditService } from '../../common/audit/audit.service';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +14,7 @@ export class AuthService {
     @Inject(PG_POOL) private pool: Pool,
     private jwt: JwtService,
     private config: ConfigService,
+    private audit: AuditService,
   ) {}
 
   private async issueTokens(user: {
@@ -27,13 +30,13 @@ export class AuthService {
       branchId: user.branch_id,
     };
     const accessToken = this.jwt.sign(payload, {
-      secret: this.config.get<string>('JWT_ACCESS_SECRET') || 'dev-access-secret',
+      secret: requireEnv(this.config, 'JWT_ACCESS_SECRET'),
       expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES_IN') || '1h',
     });
     const refreshExpiry = this.config.get<string>('JWT_REFRESH_EXPIRES_IN') || '30d';
     const sid = randomUUID();
     const refreshToken = this.jwt.sign({ ...payload, sid }, {
-      secret: this.config.get<string>('JWT_REFRESH_SECRET') || 'dev-refresh-secret',
+      secret: requireEnv(this.config, 'JWT_REFRESH_SECRET'),
       expiresIn: refreshExpiry,
     });
     const decoded: any = this.jwt.decode(refreshToken);
@@ -59,17 +62,29 @@ export class AuthService {
               r.name AS role_name
        FROM users u
        LEFT JOIN roles r ON r.id = u.role_id
-       WHERE (lower(u.email)=lower($1) OR regexp_replace(COALESCE(u.phone,''),'[^0-9]','','g')=regexp_replace($1,'[^0-9]','','g')) AND u.is_deleted = false`,
+       WHERE (lower(u.email)=lower($1)
+              -- Mobile login: compare the last 10 digits so +91 / 91 / 0 prefixes all work. Only
+              -- when the input actually has 10+ digits -- otherwise an email login (no digits)
+              -- compared '' = '' and matched every user without a phone, picking the wrong account.
+              OR (length(regexp_replace($1,'[^0-9]','','g')) >= 10
+                  AND right(regexp_replace(COALESCE(u.phone,''),'[^0-9]','','g'), 10) = right(regexp_replace($1,'[^0-9]','','g'), 10)))
+         AND u.is_deleted = false
+       ORDER BY (lower(u.email)=lower($1)) DESC
+       LIMIT 1`,
       [email],
     );
     const user = rows[0];
     if (!user || !user.is_active) {
+      // Login identifier logged, never the password -- same reasoning as not logging JWTs/API keys.
+      this.audit.log({ action: 'login_failed', resourceType: 'auth', result: 'failed', detail: { identifier: email } });
       throw new UnauthorizedException('Invalid credentials');
     }
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      this.audit.log({ userId: user.id, branchId: user.branch_id, action: 'login_failed', resourceType: 'auth', result: 'failed' });
       throw new UnauthorizedException('Invalid credentials');
     }
+    this.audit.log({ userId: user.id, branchId: user.branch_id, action: 'login_succeeded', resourceType: 'auth', result: 'success' });
     const tokens = await this.issueTokens(user);
     return {
       ...tokens,
@@ -87,7 +102,7 @@ export class AuthService {
     let payload: any;
     try {
       payload = this.jwt.verify(refreshToken, {
-        secret: this.config.get<string>('JWT_REFRESH_SECRET') || 'dev-refresh-secret',
+        secret: requireEnv(this.config, 'JWT_REFRESH_SECRET'),
       });
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
@@ -118,7 +133,7 @@ export class AuthService {
       const accessToken = this.jwt.sign(
         { sub: user.id, email: user.email, roleName: user.role_name, branchId: user.branch_id },
         {
-          secret: this.config.get<string>('JWT_ACCESS_SECRET') || 'dev-access-secret',
+          secret: requireEnv(this.config, 'JWT_ACCESS_SECRET'),
           expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES_IN') || '1h',
         },
       );

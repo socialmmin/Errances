@@ -5,7 +5,6 @@ import { ClipboardList, FileText, CalendarClock, StickyNote } from 'lucide-react
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { useCreateLeadNote, useLeadNotesFeed } from '@/hooks/use-lead-notes';
-import { tr, locale } from '@/i18n';
 
 const SOURCE_ICON = { note: StickyNote, requirement: ClipboardList, quotation: FileText, followup: CalendarClock } as const;
 const SOURCE_STYLE = {
@@ -31,7 +30,7 @@ export function LeadNotesFeed({ leadId }: { leadId: string }) {
       await createNote.mutateAsync(body);
       setDraft('');
     } catch (error: any) {
-      toast(error.message || tr("Could not save the note"), 'error');
+      toast(error.message || 'Could not save the note', 'error');
     }
   }
 
@@ -41,18 +40,18 @@ export function LeadNotesFeed({ leadId }: { leadId: string }) {
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder={tr("Type a note about this lead…")}
+          placeholder="Type a note about this lead…"
           className="min-h-24 w-full rounded-xl border border-border bg-background p-4 text-sm focus:border-gold focus:outline-none"
         />
         <Button variant="gold" className="mt-2 gap-2" disabled={!draft.trim() || createNote.isPending} onClick={submit}>
-          {createNote.isPending ? tr("Saving…") : tr("Add note")}
+          {createNote.isPending ? 'Saving…' : 'Add note'}
         </Button>
       </div>
 
       <div>
-        <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">{tr("Recent activity (last")}{' '}{10})</h3>
-        {isLoading ? <p className="text-sm text-muted-foreground">{tr("Loading…")}</p>
-          : !data?.data.length ? <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">{tr("No notes yet — from here, requirements, quotations or follow-ups.")}</p>
+        <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Recent activity (last {10})</h3>
+        {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p>
+          : !data?.data.length ? <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No notes yet — from here, requirements, quotations or follow-ups.</p>
           : <div className="space-y-2">
             {data.data.map((item) => {
               const Icon = SOURCE_ICON[item.source];
@@ -60,7 +59,7 @@ export function LeadNotesFeed({ leadId }: { leadId: string }) {
                 <div key={item.id} className="flex gap-3 rounded-xl border border-border bg-background p-3">
                   <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${SOURCE_STYLE[item.source]}`}><Icon className="h-4 w-4" /></div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-1"><span className="text-xs font-semibold text-navy dark:text-gold">{tr(item.label)}</span><span className="text-[11px] text-muted-foreground">{new Date(item.at).toLocaleString(locale())}{item.by ? ` · ${item.by}` : ''}</span></div>
+                    <div className="flex flex-wrap items-center justify-between gap-1"><span className="text-xs font-semibold text-navy dark:text-gold">{item.label}</span><span className="text-[11px] text-muted-foreground">{new Date(item.at).toLocaleString('en-IN')}{item.by ? ` · ${item.by}` : ''}</span></div>
                     <p className="mt-1 whitespace-pre-wrap text-sm">{item.body}</p>
                   </div>
                 </div>

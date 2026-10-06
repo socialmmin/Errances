@@ -4,7 +4,6 @@ import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from './button';
 import { cn } from '@/lib/utils';
-import { tr } from '@/i18n';
 
 interface ConfirmOptions {
   title: string;
@@ -95,22 +94,22 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
                 <AlertTriangle className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-semibold text-foreground">{tr(pending.title)}</h3>
+                <h3 className="text-base font-semibold text-foreground">{pending.title}</h3>
                 {pending.description && (
-                  <p className="mt-1.5 text-sm text-muted-foreground">{tr(pending.description)}</p>
+                  <p className="mt-1.5 text-sm text-muted-foreground">{pending.description}</p>
                 )}
               </div>
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => close(false)}>
-                {pending.cancelLabel ?? tr("Cancel")}
+                {pending.cancelLabel ?? 'Cancel'}
               </Button>
               <Button
                 size="sm"
                 variant={pending.variant === 'destructive' ? 'destructive' : 'gold'}
                 onClick={() => close(true)}
               >
-                {pending.confirmLabel ?? tr("Confirm")}
+                {pending.confirmLabel ?? 'Confirm'}
               </Button>
             </div>
           </div>

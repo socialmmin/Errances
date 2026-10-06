@@ -7,7 +7,6 @@ import { useTasks, useUpdateTask } from '@/hooks/use-tasks';
 import { Task } from '@/types/task';
 import { TaskForm } from '@/components/tasks/task-form';
 import { useToast } from '@/components/ui/toast';
-import { tr, locale } from '@/i18n';
 
 const STATUS_OPTIONS = ['open', 'in_progress', 'done', 'cancelled'];
 
@@ -22,15 +21,15 @@ function StatusCell({ task }: { task: Task }) {
       onChange={async (e) => {
         try {
           await updateMutation.mutateAsync({ status: e.target.value });
-          toast(tr("Task updated"), 'success');
+          toast('Task updated', 'success');
         } catch (err: any) {
-          toast(err.message || tr("Failed to update task"), 'error');
+          toast(err.message || 'Failed to update task', 'error');
         }
       }}
       onClick={(e) => e.stopPropagation()}
     >
       {STATUS_OPTIONS.map((s) => (
-        <option key={s} value={s}>{tr(s.replace(/_/g, ' '))}</option>
+        <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
       ))}
     </select>
   );
@@ -43,7 +42,7 @@ const columns: ColumnDef<Task>[] = [
     header: 'Due',
     cell: ({ getValue }) => {
       const v = getValue<string | null>();
-      return v ? new Date(v).toLocaleDateString(locale()) : '—';
+      return v ? new Date(v).toLocaleDateString() : '—';
     },
   },
   { accessorKey: 'priority', header: 'Priority' },
@@ -61,12 +60,12 @@ export default function TasksPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy dark:text-white">{tr("Tasks")}</h1>
+        <h1 className="text-2xl font-semibold text-navy dark:text-white">Tasks</h1>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="rounded-md bg-gold px-4 py-2 text-sm font-semibold text-navy-900 hover:bg-gold-600"
         >
-          {showForm ? tr("Close") : tr("+ New Task")}
+          {showForm ? 'Close' : '+ New Task'}
         </button>
       </div>
 
@@ -74,7 +73,7 @@ export default function TasksPage() {
 
       {isError && (
         <p className="text-sm text-red-500">
-          {tr("Failed to load tasks:")}{' '}{(error as Error)?.message ?? tr("unknown error")}
+          Failed to load tasks: {(error as Error)?.message ?? 'unknown error'}
         </p>
       )}
 

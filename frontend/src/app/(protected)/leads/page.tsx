@@ -1,7 +1,7 @@
 'use client';
 
 import { formatPhone } from '@/lib/utils';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ColumnDef } from '@tanstack/react-table';
@@ -19,10 +19,12 @@ import { Lead } from '@/types/lead';
 import { useAuthStore } from '@/store/auth-store';
 import { useToast } from '@/components/ui/toast';
 import { LEAD_STATUSES, STATUS_GROUPS, leadStatusLabel, QUALITY_STYLE } from '@/lib/lead-statuses';
+import { ReasonDialog, needsReason } from '@/components/leads/reason-dialog';
+import { stageDestination } from '@/lib/stage-actions';
 import { CampaignFilterSelect } from '@/components/leads/campaign-filter-select';
+import { AddLeadModal } from '@/components/leads/add-lead-modal';
 import { StatusGuide } from '@/components/leads/status-guide';
 import { WhatsAppChoice } from '@/components/shared/whatsapp-choice';
-import { tr, locale } from '@/i18n';
 
 const selectClass = 'h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground';
 
@@ -62,6 +64,7 @@ export default function LeadsPage() {
   const [viewMode, setViewMode] = useState<'table' | 'board' | 'cards'>('table');
   const [exportOpen, setExportOpen] = useState(false);
   const [exportCampaigns, setExportCampaigns] = useState<Set<string>>(new Set());
+  const [addLeadOpen, setAddLeadOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -70,8 +73,15 @@ export default function LeadsPage() {
     if (saved === 'table' || saved === 'board' || saved === 'cards') setViewMode(saved);
   }, []);
 
+  // Accumulates each page's rows as the list scrolls (instead of replacing them, like a normal
+  // page-1-only fetch would) -- "keep scrolling and it should keep loading" per the business
+  // owner's own words, instead of a Previous/Next click. Reset to empty on the exact same filter
+  // changes that already reset `page` back to 1, since those start a brand-new result set.
+  const [accumulatedLeads, setAccumulatedLeads] = useState<Lead[]>([]);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setPage(1);
+    setAccumulatedLeads([]);
     setSelected(new Set());
   }, [search, status, source, campaignName, noPhone, itineraryStatus, assignedTo, dateFrom, dateTo]);
 
@@ -104,17 +114,44 @@ export default function LeadsPage() {
   const { data: assignableUsers } = useAssignableUsers();
   const bulkAssign = useBulkAssignLeads();
   const quickUpdate = useQuickUpdateLead();
+  const [reasonFor, setReasonFor] = useState<{ lead: Lead; status: string } | null>(null);
   const hasCampaignOptions = (campaigns?.length ?? 0) > 0;
   const selectedExportLeadCount = hasCampaignOptions ? (campaigns ?? []).reduce(
     (sum, campaign) => sum + (exportCampaigns.has(campaign.campaign_name) ? campaign.lead_count : 0),
     0,
   ) : (data?.total ?? 0);
 
-  const leads = data?.data ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const firstResult = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const lastResult = Math.min(page * PAGE_SIZE, total);
+  const leads = viewMode === 'board' ? (data?.data ?? []) : accumulatedLeads;
+  // Only the very first fetch should blank the list to a skeleton -- every subsequent page
+  // loading in behind the scroll sentinel must not wipe out everything already rendered.
+  const isInitialLoading = viewMode === 'board' ? isLoading : isLoading && accumulatedLeads.length === 0;
+
+  useEffect(() => {
+    if (viewMode === 'board' || !data) return;
+    setAccumulatedLeads((prev) => {
+      if (page === 1) return data.data;
+      // Dedupe in case a refetch (e.g. a socket-driven invalidation) re-delivers a page we
+      // already appended -- keeps a fast-updating list from ever showing the same row twice.
+      const seen = new Set(prev.map((l) => l.id));
+      return [...prev, ...data.data.filter((l) => !seen.has(l.id))];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, page, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'board') return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !isLoading && page < totalPages) {
+        setPage((p) => p + 1);
+      }
+    }, { rootMargin: '400px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isLoading, page, totalPages, viewMode]);
 
   function changeView(mode: 'table' | 'board' | 'cards') {
     setViewMode(mode);
@@ -138,7 +175,7 @@ export default function LeadsPage() {
   }
 
   const dateLabel = dateFrom || dateTo
-    ? `${dateFrom ? new Date(`${dateFrom}T00:00:00`).toLocaleDateString(locale()) : 'Start'} – ${dateTo ? new Date(`${dateTo}T00:00:00`).toLocaleDateString(locale()) : 'Today'}`
+    ? `${dateFrom ? new Date(`${dateFrom}T00:00:00`).toLocaleDateString('en-IN') : 'Start'} – ${dateTo ? new Date(`${dateTo}T00:00:00`).toLocaleDateString('en-IN') : 'Today'}`
     : 'All dates';
 
   function toggleAll() {
@@ -163,8 +200,8 @@ export default function LeadsPage() {
   }
 
   async function downloadExport() {
-    if (hasCampaignOptions && exportCampaigns.size === 0) return toast(tr("Select at least one campaign"), 'error');
-    if (!selectedExportLeadCount) return toast(tr("No leads match the selected filters"), 'error');
+    if (hasCampaignOptions && exportCampaigns.size === 0) return toast('Select at least one campaign', 'error');
+    if (!selectedExportLeadCount) return toast('No leads match the selected filters', 'error');
     setExporting(true);
     try {
       const token = useAuthStore.getState().accessToken;
@@ -182,14 +219,14 @@ export default function LeadsPage() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `ErranceVoyages-Leads-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.download = `Errances-Leads-${new Date().toISOString().slice(0, 10)}.xlsx`;
       anchor.style.display = 'none';
       document.body.appendChild(anchor);
       anchor.click();
       window.setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 2000);
       setExportOpen(false);
-      toast(tr("Campaign leads exported"), 'success');
-    } catch (error: any) { toast(error.message || tr("Export failed"), 'error'); }
+      toast('Campaign leads exported', 'success');
+    } catch (error: any) { toast(error.message || 'Export failed', 'error'); }
     finally { setExporting(false); }
   }
 
@@ -205,9 +242,9 @@ export default function LeadsPage() {
       const response = await fetch(`${API_URL}/leads/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || 'Import failed');
-      toast(tr("Import complete: {profilesCreated} profiles created, {enquiriesAdded} enquiries added", { profilesCreated: result.profilesCreated, enquiriesAdded: result.enquiriesAdded }), 'success');
+      toast(`Import complete: ${result.profilesCreated} profiles created, ${result.enquiriesAdded} enquiries added`, 'success');
       window.location.reload();
-    } catch (error: any) { toast(error.message || tr("Import failed"), 'error'); }
+    } catch (error: any) { toast(error.message || 'Import failed', 'error'); }
     finally { setImporting(false); }
   }
 
@@ -215,7 +252,9 @@ export default function LeadsPage() {
     {
       id: 'serial',
       header: '#',
-      cell: ({ row }) => <span className="text-xs font-semibold text-muted-foreground">{(page - 1) * PAGE_SIZE + row.index + 1}</span>,
+      // `leads` is now the accumulated (scrolled-so-far) list, not just the current page's slice
+      // -- row.index is already the right position within it.
+      cell: ({ row }) => <span className="text-xs font-semibold text-muted-foreground">{row.index + 1}</span>,
     },
     ...(canAssign && selectMode
       ? [
@@ -243,7 +282,7 @@ export default function LeadsPage() {
     {
       accessorKey: 'lead_date',
       header: 'Date',
-      cell: ({ row }) => { const at = new Date(row.original.lead_date || row.original.created_at || Date.now()); return <span className="whitespace-nowrap text-xs text-muted-foreground"><span className="font-medium text-foreground">{at.toLocaleDateString(locale())}</span><br />{at.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}</span>; },
+      cell: ({ row }) => { const at = new Date(row.original.lead_date || row.original.created_at || Date.now()); return <span className="whitespace-nowrap text-xs text-muted-foreground"><span className="font-medium text-foreground">{at.toLocaleDateString('en-IN')}</span><br />{at.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span>; },
     },
     { accessorKey: 'customer_name', header: 'Customer', cell: ({ getValue }) => { const name = String(getValue() || ''); const initials = name.split(/s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?'; return <div className="flex items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gold to-amber-500 text-[11px] font-bold text-navy shadow-sm">{initials}</span><span className="text-[13px] font-bold leading-tight tracking-tight text-navy dark:text-white">{name}</span></div>; } },
     { accessorKey: 'phone', header: 'Phone', cell: ({ row }) => <span className="whitespace-nowrap font-medium tabular-nums">{formatPhone(row.original.phone || row.original.whatsapp_number) || '—'}</span> },
@@ -255,7 +294,7 @@ export default function LeadsPage() {
     },
     {
       accessorKey: 'itinerary_status',
-      header: () => <span title={tr("Status of the automatic WhatsApp itinerary message")}>{tr("Auto WhatsApp")}</span>,
+      header: () => <span title="Status of the automatic WhatsApp itinerary message">Auto WhatsApp</span>,
       cell: ({ getValue }) => {
         const status = String(getValue() || '');
         const style = status === 'read' ? 'bg-emerald-100 text-emerald-700' : status === 'delivered' ? 'bg-indigo-100 text-indigo-700'
@@ -266,23 +305,34 @@ export default function LeadsPage() {
           : status === 'unconfirmed' ? 'Unconfirmed' : status === 'failed' ? 'Failed' : status === 'test_mode_skipped' ? 'Test mode' : 'Not sent';
         const title = status === 'sent' || status === 'accepted' ? 'Meta accepted this send but has not yet confirmed delivery'
           : status === 'unconfirmed' ? "Meta never confirmed delivery -- we can't verify whether this reached the customer" : undefined;
-        return <span title={tr(title)} className={`rounded-full px-2 py-0.5 text-xs font-semibold ${style}`}>{tr(label)}</span>;
+        return <span title={title} className={`rounded-full px-2 py-0.5 text-xs font-semibold ${style}`}>{label}</span>;
+      },
+    },
+    {
+      accessorKey: 'last_reply_at',
+      header: () => <span title="Has the customer written back on WhatsApp?">Replied</span>,
+      cell: ({ getValue }) => {
+        const at = getValue() as string | null | undefined;
+        if (!at) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">No reply</span>;
+        const mins = Math.floor((Date.now() - new Date(at).getTime()) / 60000);
+        const ago = mins < 60 ? `${Math.max(mins, 1)}m ago` : mins < 1440 ? `${Math.floor(mins / 60)}h ago` : `${Math.floor(mins / 1440)}d ago`;
+        return <span title={new Date(at).toLocaleString('en-IN')} className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Replied · {ago}</span>;
       },
     },
     {
       id: 'status_priority',
       header: 'Status',
-      cell: ({ row }) => { const lead=row.original; return <div className="flex items-center gap-1.5">{canEdit ? <select aria-label={tr("Status for {customer_name}", { customer_name: lead.customer_name })} className="h-8 min-w-[9.5rem] rounded-full border border-blue-200 bg-blue-50 px-2 text-xs font-semibold text-blue-700" value={lead.status} disabled={quickUpdate.isPending} onClick={(event)=>event.stopPropagation()} onChange={(event)=>{event.stopPropagation(); const nextStatus=event.target.value; quickUpdate.mutate({id:lead.id,input:{status:nextStatus}},{onSuccess:()=>toast(tr("Status changed to {value}", { value: leadStatusLabel(nextStatus) }),'success'),onError:(error:any)=>toast(error.message || tr("Could not change status"),'error')});}}>{STATUS_GROUPS.map((g)=><optgroup key={g.key} label={tr(g.label)}>{g.statuses.map((status)=><option key={status.value} value={status.value}>{tr(status.label)}</option>)}</optgroup>)}</select> : <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">{leadStatusLabel(lead.status)}</span>}{lead.quality && <span title={tr("Lead quality: {label}", { label: QUALITY_STYLE[lead.quality]?.label })} className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${QUALITY_STYLE[lead.quality]?.chip}`}>{tr(QUALITY_STYLE[lead.quality]?.label)}</span>}</div>; },
+      cell: ({ row }) => { const lead=row.original; return <div className="flex items-center gap-1.5">{canEdit ? <select aria-label={`Status for ${lead.customer_name}`} className="h-8 min-w-[9.5rem] rounded-full border border-blue-200 bg-blue-50 px-2 text-xs font-semibold text-blue-700" value={lead.status} disabled={quickUpdate.isPending} onClick={(event)=>event.stopPropagation()} onChange={(event)=>{event.stopPropagation(); const nextStatus=event.target.value; if (needsReason(nextStatus) && nextStatus !== lead.status) { setReasonFor({ lead, status: nextStatus }); return; } quickUpdate.mutate({id:lead.id,input:{status:nextStatus}},{onSuccess:()=>{ const next = nextStatus !== lead.status ? stageDestination(nextStatus, lead) : null; toast(`Status changed to ${leadStatusLabel(nextStatus)}${next ? ` — now ${next.label}` : ''}`,'success'); if (next) router.push(next.href); },onError:(error:any)=>toast(error.message || 'Could not change status','error')});}}>{STATUS_GROUPS.map((g)=><optgroup key={g.key} label={g.label}>{g.statuses.map((status)=><option key={status.value} value={status.value}>{status.label}</option>)}</optgroup>)}</select> : <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">{leadStatusLabel(lead.status)}</span>}{canEdit && needsReason(lead.status) && !String(lead.lost_reason ?? '').trim() && <button type="button" title="This lead was closed without a reason. Add it now." onClick={(event)=>{event.stopPropagation(); setReasonFor({ lead, status: lead.status });}} className="whitespace-nowrap rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 hover:bg-red-100">Add reason</button>}{lead.quality && <span title={`Lead quality: ${QUALITY_STYLE[lead.quality]?.label}`} className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${QUALITY_STYLE[lead.quality]?.chip}`}>{QUALITY_STYLE[lead.quality]?.label}</span>}</div>; },
     },
     {
       accessorKey: 'assigned_to_name',
       header: 'Assigned To',
-      cell: ({ getValue }) => <span className="text-xs">{(getValue() as string) || tr("Unassigned")}</span>,
+      cell: ({ getValue }) => <span className="text-xs">{(getValue() as string) || 'Unassigned'}</span>,
     },
     {
       id: 'actions',
       header: 'Quick Actions',
-      cell: ({ row }) => { const lead=row.original; const phone=lead.whatsapp_number || lead.phone || ''; return <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}><button title={tr("Call")} disabled={!lead.phone} className="rounded-md p-2 text-navy hover:bg-navy/10 disabled:opacity-30 dark:text-gold" onClick={(event) => { event.stopPropagation(); if (lead.phone) window.location.href=`tel:${lead.phone}`; }}><Phone className="h-4 w-4" /></button><WhatsAppChoice leadId={lead.id} phone={phone} title={tr("WhatsApp")} className="rounded-md p-2 text-emerald-600 hover:bg-emerald-50 disabled:opacity-30"><MessageCircle className="h-4 w-4" /></WhatsAppChoice><button title={tr("Open profile")} className="rounded-md p-2 text-slate-600 hover:bg-muted" onClick={(event) => { event.stopPropagation(); router.push(`/leads/${lead.id}`); }}><Eye className="h-4 w-4" /></button></div>; },
+      cell: ({ row }) => { const lead=row.original; const phone=lead.whatsapp_number || lead.phone || ''; return <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}><button title="Call" disabled={!lead.phone} className="rounded-md p-2 text-navy hover:bg-navy/10 disabled:opacity-30 dark:text-gold" onClick={(event) => { event.stopPropagation(); if (lead.phone) window.location.href=`tel:${lead.phone}`; }}><Phone className="h-4 w-4" /></button><WhatsAppChoice leadId={lead.id} phone={phone} title="WhatsApp" className="rounded-md p-2 text-emerald-600 hover:bg-emerald-50 disabled:opacity-30"><MessageCircle className="h-4 w-4" /></WhatsAppChoice><button title="Open profile" className="rounded-md p-2 text-slate-600 hover:bg-muted" onClick={(event) => { event.stopPropagation(); router.push(`/leads/${lead.id}`); }}><Eye className="h-4 w-4" /></button></div>; },
     },
   ];
 
@@ -290,75 +340,75 @@ export default function LeadsPage() {
     <div className="space-y-5">
       <StatusGuide />
       <div className="flex items-center justify-end gap-2">
-        {canAssign && <Button variant={selectMode ? 'gold' : 'outline'} onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}>{selectMode ? tr("Done selecting") : tr("Select leads")}</Button>}
+        {canAssign && <Button variant={selectMode ? 'gold' : 'outline'} onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}>{selectMode ? 'Done selecting' : 'Select leads'}</Button>}
         <PermissionGuard permission={PERMISSIONS.LEADS_CREATE}>
-          <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium hover:bg-muted"><Upload className="h-4 w-4" />{importing ? tr("Importing…") : tr("Import Excel")}<input type="file" accept=".xlsx" className="hidden" disabled={importing} onChange={importLeads} /></label>
+          <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium hover:bg-muted"><Upload className="h-4 w-4" />{importing ? 'Importing…' : 'Import Excel'}<input type="file" accept=".xlsx" className="hidden" disabled={importing} onChange={importLeads} /></label>
         </PermissionGuard>
         <PermissionGuard permission={PERMISSIONS.LEADS_EXPORT}>
-          <Button variant="outline" className="gap-2" onClick={() => { setExportCampaigns(new Set((campaigns ?? []).map((item) => item.campaign_name))); setExportOpen(true); }}><Download className="h-4 w-4" />{' '}{tr("Export leads")}</Button>
+          <Button variant="outline" className="gap-2" onClick={() => { setExportCampaigns(new Set((campaigns ?? []).map((item) => item.campaign_name))); setExportOpen(true); }}><Download className="h-4 w-4" /> Export leads</Button>
         </PermissionGuard>
         <PermissionGuard permission={PERMISSIONS.LEADS_CREATE}>
-          <Link href="/leads/new">
-            <Button variant="gold">{tr("+ New Lead")}</Button>
-          </Link>
+          <Button variant="outline" onClick={() => router.push('/leads/not-interested')}>Not interested — reasons</Button>
+          <Button variant="gold" onClick={() => setAddLeadOpen(true)}>+ New Lead</Button>
         </PermissionGuard>
       </div>
+      {addLeadOpen && <AddLeadModal onClose={() => setAddLeadOpen(false)} />}
 
       {exportOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setExportOpen(false); }}>
           <div className="w-full max-w-xl rounded-2xl border border-border bg-card shadow-2xl">
-            <div className="flex items-start justify-between border-b border-border px-6 py-5"><div><h2 className="text-lg font-bold text-navy dark:text-white">{tr("Export campaign leads")}</h2><p className="mt-1 text-sm text-muted-foreground">{tr("Each selected campaign gets its own sheet. Overall Leads contains all selected campaigns, newest first.")}</p></div><button onClick={() => setExportOpen(false)} className="rounded-lg p-2 hover:bg-muted"><X className="h-4 w-4" /></button></div>
+            <div className="flex items-start justify-between border-b border-border px-6 py-5"><div><h2 className="text-lg font-bold text-navy dark:text-white">Export campaign leads</h2><p className="mt-1 text-sm text-muted-foreground">Each selected campaign gets its own sheet. Overall Leads contains all selected campaigns, newest first.</p></div><button onClick={() => setExportOpen(false)} className="rounded-lg p-2 hover:bg-muted"><X className="h-4 w-4" /></button></div>
             <div className="max-h-[55vh] space-y-2 overflow-y-auto p-6">
-              {hasCampaignOptions?<label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-border p-3 font-semibold"><span className="flex items-center gap-3"><input type="checkbox" checked={exportCampaigns.size === campaigns?.length} onChange={(event) => setExportCampaigns(event.target.checked ? new Set((campaigns ?? []).map((item) => item.campaign_name)) : new Set())} />{' '}{tr("Select all campaigns")}</span><span className="rounded-full bg-navy px-3 py-1 text-xs font-bold text-white">{selectedExportLeadCount.toLocaleString(locale())}{' '}{tr("leads")}</span></label>:<div className="flex items-center justify-between gap-3 rounded-lg border border-gold/40 bg-gold/5 p-3"><div><p className="font-semibold">{tr("Export selected date range")}</p><p className="text-xs text-muted-foreground">{dateLabel}{' '}{tr("· includes leads without campaign names")}</p></div><span className="rounded-full bg-navy px-3 py-1 text-xs font-bold text-white">{selectedExportLeadCount.toLocaleString(locale())}{' '}{tr("leads")}</span></div>}
+              {hasCampaignOptions?<label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-border p-3 font-semibold"><span className="flex items-center gap-3"><input type="checkbox" checked={exportCampaigns.size === campaigns?.length} onChange={(event) => setExportCampaigns(event.target.checked ? new Set((campaigns ?? []).map((item) => item.campaign_name)) : new Set())} /> Select all campaigns</span><span className="rounded-full bg-navy px-3 py-1 text-xs font-bold text-white">{selectedExportLeadCount.toLocaleString('en-IN')} leads</span></label>:<div className="flex items-center justify-between gap-3 rounded-lg border border-gold/40 bg-gold/5 p-3"><div><p className="font-semibold">Export selected date range</p><p className="text-xs text-muted-foreground">{dateLabel} · includes leads without campaign names</p></div><span className="rounded-full bg-navy px-3 py-1 text-xs font-bold text-white">{selectedExportLeadCount.toLocaleString('en-IN')} leads</span></div>}
               {(campaigns ?? []).map((campaign) => <label key={campaign.campaign_name} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-border p-3 hover:border-gold/50"><span className="flex items-center gap-3"><input type="checkbox" checked={exportCampaigns.has(campaign.campaign_name)} onChange={() => setExportCampaigns((previous) => { const next = new Set(previous); if (next.has(campaign.campaign_name)) next.delete(campaign.campaign_name); else next.add(campaign.campaign_name); return next; })} /><span className="text-sm font-medium">{campaign.campaign_name}</span></span><span className="rounded-full bg-gold/10 px-2 py-1 text-xs font-semibold text-gold-700">{campaign.lead_count}</span></label>)}
             </div>
-            <div className="flex items-center justify-between border-t border-border px-6 py-4"><div><p className="text-sm font-semibold text-navy dark:text-white">{selectedExportLeadCount.toLocaleString(locale())}{' '}{tr("total leads")}</p><p className="text-xs text-muted-foreground">{hasCampaignOptions?tr("{size} campaign{value} selected", { size: exportCampaigns.size, value: exportCampaigns.size === 1 ? '' : 's' }):tr("Selected date filter")}</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => setExportOpen(false)}>{tr("Cancel")}</Button><Button variant="gold" disabled={exporting || selectedExportLeadCount === 0 || (hasCampaignOptions&&exportCampaigns.size===0)} onClick={downloadExport}>{exporting ? tr("Preparing…") : tr("Download Excel")}</Button></div></div>
+            <div className="flex items-center justify-between border-t border-border px-6 py-4"><div><p className="text-sm font-semibold text-navy dark:text-white">{selectedExportLeadCount.toLocaleString('en-IN')} total leads</p><p className="text-xs text-muted-foreground">{hasCampaignOptions?`${exportCampaigns.size} campaign${exportCampaigns.size === 1 ? '' : 's'} selected`:'Selected date filter'}</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => setExportOpen(false)}>Cancel</Button><Button variant="gold" disabled={exporting || selectedExportLeadCount === 0 || (hasCampaignOptions&&exportCampaigns.size===0)} onClick={downloadExport}>{exporting ? 'Preparing…' : 'Download Excel'}</Button></div></div>
           </div>
         </div>
       )}
 
       <section className="flex flex-wrap items-center gap-7 rounded-2xl bg-gradient-to-r from-navy via-navy-900 to-navy-800 px-7 py-6 text-white shadow-lg ring-1 ring-gold/20">
-        <div className="min-w-64 border-r border-gold/30 pr-8"><h1 className="text-2xl font-bold text-gold">{tr("Leads")}</h1><p className="mt-1 text-sm text-slate-300">{tr("Manage and track all your sales leads")}</p></div>
-        {[['Total leads', stats?.total], ["Today's leads", stats?.today], ['New leads', stats?.new_leads], ['Hot / strong', stats?.hot], ['Unassigned', stats?.unassigned]].map(([label,value]) => <div key={String(label)}><p className="text-3xl font-bold text-white">{value ?? '—'}</p><p className="mt-1 text-xs font-semibold uppercase tracking-wider text-gold/80">{tr(label)}</p></div>)}
+        <div className="min-w-64 border-r border-gold/30 pr-8"><h1 className="text-2xl font-bold text-gold">Leads</h1><p className="mt-1 text-sm text-slate-300">Manage and track all your sales leads</p></div>
+        {[['Total leads', stats?.total], ["Today's leads", stats?.today], ['New leads', stats?.new_leads], ['Hot / strong', stats?.hot], ['Unassigned', stats?.unassigned]].map(([label,value]) => <div key={String(label)}><p className="text-3xl font-bold text-white">{value ?? '—'}</p><p className="mt-1 text-xs font-semibold uppercase tracking-wider text-gold/80">{label}</p></div>)}
       </section>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
         <Input
-          placeholder={tr("Search by name, phone, or email…")}
+          placeholder="Search by name, phone, or email…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm"
         />
         <CampaignFilterSelect value={campaignName} onChange={setCampaignName} campaigns={filterCampaigns} />
         <select className={selectClass} value={noPhone ? 'none' : 'all'} onChange={(e) => setNoPhone(e.target.value === 'none')}>
-          <option value="all">{tr("All leads")}</option>
-          <option value="none">{tr("No phone number")}</option>
+          <option value="all">All leads</option>
+          <option value="none">No phone number</option>
         </select>
-        <select className={selectClass} value={itineraryStatus} onChange={(e) => setItineraryStatus(e.target.value)} title={tr("Filter by the automatic WhatsApp itinerary's status")}>
-          <option value="">{tr("Auto WhatsApp: all")}</option>
-          <option value="read">{tr("Viewed")}</option>
-          <option value="delivered">{tr("Delivered")}</option>
-          <option value="sent">{tr("Sent (not yet delivered)")}</option>
-          <option value="unconfirmed">{tr("Unconfirmed — no reply from Meta")}</option>
-          <option value="failed">{tr("Failed")}</option>
-          <option value="none">{tr("Not sent yet")}</option>
+        <select className={selectClass} value={itineraryStatus} onChange={(e) => setItineraryStatus(e.target.value)} title="Filter by the automatic WhatsApp itinerary's status">
+          <option value="">Auto WhatsApp: all</option>
+          <option value="read">Viewed</option>
+          <option value="delivered">Delivered</option>
+          <option value="sent">Sent (not yet delivered)</option>
+          <option value="unconfirmed">Unconfirmed — no reply from Meta</option>
+          <option value="failed">Failed</option>
+          <option value="none">Not sent yet</option>
         </select>
         <select className={selectClass} value={source} onChange={(e) => setSource(e.target.value)}>
-          <option value="">{tr("All sources")}</option>
+          <option value="">All sources</option>
           {SOURCES.map((s) => (
-            <option key={s} value={s}>{tr(s)}</option>
+            <option key={s} value={s}>{s}</option>
           ))}
         </select>
         <select className={selectClass} value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">{tr("All statuses")}</option>
+          <option value="">All statuses</option>
           {LEAD_STATUSES.map((s) => (
-            <option key={s.value} value={s.value}>{tr(s.label)}</option>
+            <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
         {canAssign && (
           <select className={selectClass} value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">{tr("All (assigned + unassigned)")}</option>
-            <option value="unassigned">{tr("Unassigned only")}</option>
+            <option value="">All (assigned + unassigned)</option>
+            <option value="unassigned">Unassigned only</option>
             {(assignableUsers?.data ?? []).map((u) => (
               <option key={u.id} value={u.id}>{u.full_name}</option>
             ))}
@@ -367,27 +417,27 @@ export default function LeadsPage() {
         <div className="relative">
           <Button type="button" variant="outline" className="min-w-52 justify-start gap-2" onClick={() => setDateMenuOpen((open) => !open)}><CalendarDays className="h-4 w-4" />{dateLabel}</Button>
           {dateMenuOpen && <div className="absolute left-0 top-11 z-50 w-80 rounded-xl border border-border bg-card p-4 shadow-xl">
-            <p className="mb-3 text-sm font-semibold text-navy dark:text-white">{tr("Select lead date")}</p>
+            <p className="mb-3 text-sm font-semibold text-navy dark:text-white">Select lead date</p>
             <div className="grid grid-cols-2 gap-2">
-              {[['Today','today'],['Yesterday','yesterday'],['Last 7 days','7'],['Last 14 days','14'],['Last 30 days','30'],['This month','month']].map(([label,preset]) => <button key={preset} type="button" className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:border-gold hover:bg-gold/5" onClick={() => applyDatePreset(preset as any)}>{tr(label)}</button>)}
+              {[['Today','today'],['Yesterday','yesterday'],['Last 7 days','7'],['Last 14 days','14'],['Last 30 days','30'],['This month','month']].map(([label,preset]) => <button key={preset} type="button" className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:border-gold hover:bg-gold/5" onClick={() => applyDatePreset(preset as any)}>{label}</button>)}
             </div>
-            <div className="mt-4 border-t border-border pt-4"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tr("Custom range")}</p><div className="grid grid-cols-2 gap-2"><Input type="date" aria-label={tr("From date")} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /><Input type="date" aria-label={tr("To date")} value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div></div>
-            <div className="mt-4 flex justify-between"><Button type="button" variant="ghost" size="sm" onClick={() => { setDateFrom(''); setDateTo(''); setDateMenuOpen(false); }}>{tr("Clear")}</Button><Button type="button" variant="gold" size="sm" onClick={() => setDateMenuOpen(false)}>{tr("Update")}</Button></div>
+            <div className="mt-4 border-t border-border pt-4"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom range</p><div className="grid grid-cols-2 gap-2"><Input type="date" aria-label="From date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /><Input type="date" aria-label="To date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div></div>
+            <div className="mt-4 flex justify-between"><Button type="button" variant="ghost" size="sm" onClick={() => { setDateFrom(''); setDateTo(''); setDateMenuOpen(false); }}>Clear</Button><Button type="button" variant="gold" size="sm" onClick={() => setDateMenuOpen(false)}>Update</Button></div>
           </div>}
         </div>
         <div className="rounded-lg border border-gold/40 bg-gold/10 px-4 py-2 text-sm font-semibold text-navy dark:text-gold">
-          {isLoading ? tr("Counting leads…") : tr("{value} lead{value2} found", { value: total.toLocaleString(locale()), value2: total === 1 ? '' : 's' })}
-          {(dateFrom || dateTo) && <span className="ml-1 font-normal text-muted-foreground">{tr("for selected dates")}</span>}
+          {isLoading ? 'Counting leads…' : `${total.toLocaleString('en-IN')} lead${total === 1 ? '' : 's'} found`}
+          {(dateFrom || dateTo) && <span className="ml-1 font-normal text-muted-foreground">for selected dates</span>}
         </div>
-        <div className="ml-auto flex rounded-md border border-border bg-background p-1" aria-label={tr("Lead view")}>
+        <div className="ml-auto flex rounded-md border border-border bg-background p-1" aria-label="Lead view">
           <Button type="button" size="sm" variant={viewMode === 'table' ? 'gold' : 'ghost'} onClick={() => changeView('table')} className="gap-1.5">
-            <Table2 className="h-4 w-4" />{' '}{tr("Table")}
+            <Table2 className="h-4 w-4" /> Table
           </Button>
           <Button type="button" size="sm" variant={viewMode === 'board' ? 'gold' : 'ghost'} onClick={() => changeView('board')} className="gap-1.5">
-            <Columns3 className="h-4 w-4" />{' '}{tr("Board")}
+            <Columns3 className="h-4 w-4" /> Board
           </Button>
           <Button type="button" size="sm" variant={viewMode === 'cards' ? 'gold' : 'ghost'} onClick={() => changeView('cards')} className="gap-1.5">
-            <LayoutGrid className="h-4 w-4" />{' '}{tr("Cards")}
+            <LayoutGrid className="h-4 w-4" /> Cards
           </Button>
         </div>
       </div>
@@ -395,17 +445,17 @@ export default function LeadsPage() {
       {campaignName && campaignSummary && (
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
           <span className="font-semibold text-navy dark:text-white">{campaignName}</span>
-          <span className="text-muted-foreground">{campaignSummary.total}{' '}{tr("lead")}{campaignSummary.total === 1 ? '' : 's'}</span>
-          <span className="font-semibold text-emerald-700">{campaignSummary.sent}{' '}{tr("itinerary sent")}</span>
-          <span className="font-semibold text-amber-700">{campaignSummary.notSent}{' '}{tr("not sent")}</span>
+          <span className="text-muted-foreground">{campaignSummary.total} lead{campaignSummary.total === 1 ? '' : 's'}</span>
+          <span className="font-semibold text-emerald-700">{campaignSummary.sent} itinerary sent</span>
+          <span className="font-semibold text-amber-700">{campaignSummary.notSent} not sent</span>
         </div>
       )}
 
       {canAssign && selected.size > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 px-4 py-2">
-          <span className="text-sm font-medium">{selected.size}{' '}{tr("lead")}{selected.size > 1 ? 's' : ''}{' '}{tr("selected")}</span>
+          <span className="text-sm font-medium">{selected.size} lead{selected.size > 1 ? 's' : ''} selected</span>
           <select className={selectClass} value={assignTarget} onChange={(e) => setAssignTarget(e.target.value)}>
-            <option value="">{tr("Assign to…")}</option>
+            <option value="">Assign to…</option>
             {(assignableUsers?.data ?? []).map((u) => (
               <option key={u.id} value={u.id}>{u.full_name}</option>
             ))}
@@ -416,15 +466,15 @@ export default function LeadsPage() {
             disabled={!assignTarget || bulkAssign.isPending}
             onClick={handleBulkAssign}
           >
-            {bulkAssign.isPending ? tr("Assigning…") : tr("Assign")}
+            {bulkAssign.isPending ? 'Assigning…' : 'Assign'}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>{tr("Clear")}</Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
 
       {isError && (
         <p className="text-sm text-red-500">
-          {tr("Failed to load leads:")}{' '}{(error as Error)?.message ?? tr("unknown error")}
+          Failed to load leads: {(error as Error)?.message ?? 'unknown error'}
         </p>
       )}
 
@@ -432,19 +482,19 @@ export default function LeadsPage() {
         <DataTable
           columns={columns}
           data={leads}
-          isLoading={isLoading}
+          isLoading={isInitialLoading}
           stickyLastColumn
           stickyFirstColumn
           compact
           onRowClick={(row) => router.push(`/leads/${row.id}`)}
           emptyMessage="No leads match the selected filters."
         />
-      ) : viewMode === 'cards' ? (isLoading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({length:6}).map((_,i)=><div key={i} className="h-48 animate-pulse rounded-xl bg-muted" />)}</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{leads.map((lead)=><article key={lead.id} onClick={()=>router.push(`/leads/${lead.id}`)} className="cursor-pointer rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-gold/60 hover:shadow-md"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-navy dark:text-white">{lead.customer_name}</p><p className="mt-1 text-xs text-muted-foreground">{formatPhone(lead.phone || lead.whatsapp_number) || tr("No phone")}</p></div><span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-700">{leadStatusLabel(lead.status)}</span></div><div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs"><div><p className="text-muted-foreground">{tr("Destination")}</p><p className="mt-1 font-medium">{lead.destination || '—'}</p></div><div><p className="text-muted-foreground">{tr("Source")}</p><p className="mt-1 font-medium capitalize">{tr((lead.source || '—').replace(/_/g,' '))}</p></div><div><p className="text-muted-foreground">{tr("Created")}</p><p className="mt-1 font-medium">{new Date(lead.lead_date || lead.created_at).toLocaleDateString(locale())}</p></div><div><p className="text-muted-foreground">{tr("Assigned")}</p><p className="mt-1 font-medium">{lead.assigned_to_name || tr("Unassigned")}</p></div></div></article>)}</div>) : isLoading ? (
+      ) : viewMode === 'cards' ? (isInitialLoading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({length:6}).map((_,i)=><div key={i} className="h-48 animate-pulse rounded-xl bg-muted" />)}</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{leads.map((lead)=><article key={lead.id} onClick={()=>router.push(`/leads/${lead.id}`)} className="cursor-pointer rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-gold/60 hover:shadow-md"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-navy dark:text-white">{lead.customer_name}</p><p className="mt-1 text-xs text-muted-foreground">{formatPhone(lead.phone || lead.whatsapp_number) || 'No phone'}</p></div><span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-700">{leadStatusLabel(lead.status)}</span></div><div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs"><div><p className="text-muted-foreground">Destination</p><p className="mt-1 font-medium">{lead.destination || '—'}</p></div><div><p className="text-muted-foreground">Source</p><p className="mt-1 font-medium capitalize">{(lead.source || '—').replace(/_/g,' ')}</p></div><div><p className="text-muted-foreground">Created</p><p className="mt-1 font-medium">{new Date(lead.lead_date || lead.created_at).toLocaleDateString('en-IN')}</p></div><div><p className="text-muted-foreground">Assigned</p><p className="mt-1 font-medium">{lead.assigned_to_name || 'Unassigned'}</p></div></div></article>)}</div>) : isLoading ? (
         <div className="flex gap-4 overflow-hidden">
           {Array.from({ length: 5 }).map((_, index) => <div key={index} className="h-96 min-w-72 animate-pulse rounded-xl border bg-muted" />)}
         </div>
       ) : leads.length === 0 ? (
-        <div className="rounded-lg border border-border px-4 py-10 text-center text-sm text-muted-foreground">{tr("No leads match the selected filters.")}</div>
+        <div className="rounded-lg border border-border px-4 py-10 text-center text-sm text-muted-foreground">No leads match the selected filters.</div>
       ) : (
         <div className="overflow-x-auto pb-3">
           <div className="flex min-w-max gap-4">
@@ -453,11 +503,11 @@ export default function LeadsPage() {
               return (
                 <section key={stage.value} className="w-72 rounded-xl border border-border bg-muted/35">
                   <header className="flex items-center justify-between border-b border-border px-4 py-3">
-                    <h2 className="text-sm font-semibold text-navy dark:text-white">{tr(stage.label)}</h2>
+                    <h2 className="text-sm font-semibold text-navy dark:text-white">{stage.label}</h2>
                     <span className="rounded-full bg-background px-2 py-0.5 text-xs font-semibold text-muted-foreground">{columnLeads.length}</span>
                   </header>
                   <div className="max-h-[64vh] space-y-2 overflow-y-auto p-2">
-                    {columnLeads.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">{tr("No leads")}</p>}
+                    {columnLeads.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">No leads</p>}
                     {columnLeads.map((lead) => (
                       <article key={lead.id} className="cursor-pointer rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-gold/60 hover:shadow" onClick={() => router.push(`/leads/${lead.id}`)}>
                         <div className="flex items-start justify-between gap-2">
@@ -468,12 +518,12 @@ export default function LeadsPage() {
                           {canAssign && <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleOne(lead.id)} onClick={(event) => event.stopPropagation()} />}
                         </div>
                         <div className="mt-3 space-y-1.5 text-xs">
-                          <p><span className="text-muted-foreground">{tr("Phone:")}</span> {lead.phone || lead.whatsapp_number || '—'}</p>
-                          <p><span className="text-muted-foreground">{tr("Tour:")}</span> {lead.destination || '—'}</p>
-                          <p className="line-clamp-2"><span className="text-muted-foreground">{tr("Campaign:")}</span> {lead.campaign_name || '—'}</p>
+                          <p><span className="text-muted-foreground">Phone:</span> {lead.phone || lead.whatsapp_number || '—'}</p>
+                          <p><span className="text-muted-foreground">Tour:</span> {lead.destination || '—'}</p>
+                          <p className="line-clamp-2"><span className="text-muted-foreground">Campaign:</span> {lead.campaign_name || '—'}</p>
                         </div>
                         <div className="mt-3 flex items-center justify-end border-t border-border pt-2 text-[11px]">
-                          <span className="max-w-32 truncate text-muted-foreground">{lead.assigned_to_name || tr("Unassigned")}</span>
+                          <span className="max-w-32 truncate text-muted-foreground">{lead.assigned_to_name || 'Unassigned'}</span>
                         </div>
                       </article>
                     ))}
@@ -485,14 +535,18 @@ export default function LeadsPage() {
         </div>
       )}
 
-      {viewMode !== 'board' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
-        <p className="text-sm text-muted-foreground">{tr("Showing")}{' '}<span className="font-semibold text-foreground">{firstResult}–{lastResult}</span>{' '}{tr("of")}{' '}<span className="font-semibold text-foreground">{total}</span>{' '}{tr("leads")}</p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={page <= 1 || isLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}>{tr("Previous")}</Button>
-          <span className="min-w-20 text-center text-sm font-medium">{tr("Page")}{' '}{page}{' '}{tr("of")}{' '}{totalPages}</span>
-          <Button variant="outline" size="sm" disabled={page >= totalPages || isLoading} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>{tr("Next")}</Button>
+      {viewMode !== 'board' && (
+        <div className="flex flex-col items-center gap-2 py-2">
+          <p className="text-sm text-muted-foreground">Showing <span className="font-semibold text-foreground">{leads.length}</span> of <span className="font-semibold text-foreground">{total}</span> leads</p>
+          {/* Invisible trigger -- scrolling this into view loads the next page automatically.
+              `rootMargin: '400px'` on the observer fires it a bit before it's actually visible, so
+              the next page is usually already loading by the time someone reaches the bottom. */}
+          {page < totalPages && <div ref={sentinelRef} className="h-4 w-full" />}
+          {isLoading && page > 1 && <p className="text-xs text-muted-foreground">Loading more…</p>}
+          {page >= totalPages && total > 0 && <p className="text-xs text-muted-foreground">You've reached the end.</p>}
         </div>
-      </div>}
+      )}
+      {reasonFor && <ReasonDialog adding={reasonFor.status === reasonFor.lead.status} leadName={reasonFor.lead.customer_name} status={reasonFor.status} saving={quickUpdate.isPending} onCancel={() => setReasonFor(null)} onConfirm={(reason) => quickUpdate.mutate({ id: reasonFor.lead.id, input: { status: reasonFor.status, lostReason: reason } }, { onSuccess: () => { toast(reasonFor.status === reasonFor.lead.status ? 'Reason saved in the Not interested list' : `Status changed to ${leadStatusLabel(reasonFor.status)} — reason saved in the Not interested list`, 'success'); setReasonFor(null); }, onError: (error: any) => toast(error.message || 'Could not change status', 'error') })} />}
     </div>
   );
 }

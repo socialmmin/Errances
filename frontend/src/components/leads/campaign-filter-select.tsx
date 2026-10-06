@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 import { CampaignOption } from '@/hooks/use-leads';
-import { tr } from '@/i18n';
 
 // Compact, app-styled dropdown for the campaign filter -- the native <select>
 // it replaces renders as a huge, plain, browser-styled list that doesn't
@@ -43,7 +42,7 @@ export function CampaignFilterSelect({ value, onChange, campaigns }: {
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={tr("Search campaigns…")}
+                placeholder="Search campaigns…"
                 className="w-full rounded-lg border border-input bg-background py-1.5 pl-8 pr-2 text-xs outline-none focus:border-gold"
               />
             </div>
@@ -54,7 +53,7 @@ export function CampaignFilterSelect({ value, onChange, campaigns }: {
               onClick={() => { onChange(''); setOpen(false); setQuery(''); }}
               className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-gold/10 ${!value ? 'font-semibold text-gold' : 'text-foreground'}`}
             >
-              {tr("All campaigns")}
+              All campaigns
             </button>
             {filtered.map((c) => (
               <button
@@ -67,7 +66,7 @@ export function CampaignFilterSelect({ value, onChange, campaigns }: {
                 <span className="shrink-0 text-xs text-muted-foreground">{c.lead_count}</span>
               </button>
             ))}
-            {!filtered.length && <p className="px-3 py-4 text-center text-xs text-muted-foreground">{tr("No campaign matches.")}</p>}
+            {!filtered.length && <p className="px-3 py-4 text-center text-xs text-muted-foreground">No campaign matches.</p>}
           </div>
         </div>
       )}
