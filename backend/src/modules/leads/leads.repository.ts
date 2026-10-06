@@ -173,7 +173,8 @@ export class LeadsRepository {
   async campaignSummary(campaignName: string, access?: LeadAccess) {
     const values: any[] = [campaignName];
     const destination = destinationInCampaignName(campaignName);
-    values.push(destination ? `%${destination}%` : '%\u0000no-match\u0000%');
+    // NULL (not a NUL-byte pattern, which Postgres rejects) makes the destination test match nothing.
+    values.push(destination ? `%${destination}%` : null);
     const accessSql = this.accessSql(access, values);
     const { rows } = await this.pool.query(
       `SELECT

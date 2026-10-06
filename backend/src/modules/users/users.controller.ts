@@ -334,8 +334,9 @@ export class UsersController {
   @RequirePermissions(PERMISSIONS.SETTINGS_USERS)
   async create(@Body() dto: CreateUserDto, @Req() req: any) {
     const digits = dto.phone;
-    const email = dto.email || `${digits}@mobile.errance.local`;
-    const { rows: existing } = await this.pool.query(`SELECT id FROM users WHERE lower(email)=lower($1) OR regexp_replace(COALESCE(phone,''),'[^0-9]','','g') IN ($2, '91' || $2)`, [email, digits]);
+    const phoneDigits = digits.replace(/\D/g, '');
+    const email = dto.email || `${phoneDigits}@mobile.errance.local`;
+    const { rows: existing } = await this.pool.query(`SELECT id FROM users WHERE lower(email)=lower($1) OR regexp_replace(COALESCE(phone,''),'[^0-9]','','g') IN ($2, '91' || $2)`, [email, phoneDigits]);
     if (existing.length) throw new ConflictException('A user with this email or mobile number already exists');
     // Branch is no longer asked for in the form (single-branch business), but every user still
     // needs one -- all branch-scoped access checks depend on it, and a null branch is denied

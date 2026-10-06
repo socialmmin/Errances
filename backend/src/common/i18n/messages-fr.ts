@@ -4,6 +4,7 @@
 // Exact-match messages.
 export const FR_EXACT: Record<string, string> = {
   'A user with this email or mobile number already exists': 'Un utilisateur avec cet e-mail ou ce numéro de mobile existe déjà',
+  'Enter a valid mobile number: 10 digits, or international with its + country code': 'Saisissez un numéro de mobile valide : 10 chiffres, ou au format international avec l\'indicatif + du pays',
   'Activate the itinerary first': "Activez d'abord l'itinéraire",
   'Add at least one valid WhatsApp number before enabling': 'Ajoutez au moins un numéro WhatsApp valide avant d\'activer',
   'An App Secret is 32 letters and numbers (0-9, a-f). Copy it again from App settings > Basic.': "Un secret d'application comporte 32 lettres et chiffres (0-9, a-f). Copiez-le à nouveau depuis Paramètres de l'application > Général.",

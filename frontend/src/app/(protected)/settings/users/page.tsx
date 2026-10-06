@@ -60,8 +60,17 @@ function AddUserDialog({ open, onClose }: { open: boolean; onClose: () => void }
   // super_admin last -- it's the one role that should be a deliberate choice, not a default.
   const roles = [...(rolesData?.data ?? [])].sort((a, b) => (a.name === 'super_admin' ? 1 : b.name === 'super_admin' ? -1 : a.name.localeCompare(b.name)));
   const selectedRole = roles.find((r) => r.id === roleId);
-  const mobileDigits = (() => { let d = phone.replace(/\D/g, ''); if (d.length === 12 && d.startsWith('91')) d = d.slice(2); if (d.length === 11 && d.startsWith('0')) d = d.slice(1); return d; })();
-  const mobileValid = /^[6-9]\d{9}$/.test(mobileDigits);
+  // Indian 10-digit mobile (+91/91/0 stripped), or an international number kept with its + country
+  // code (staff in France or elsewhere) -- the same rule the API applies.
+  const mobileDigits = (() => {
+    const raw = phone.trim();
+    if (raw.startsWith('+') && !raw.replace(/[\s-]/g, '').startsWith('+91')) return '+' + raw.replace(/\D/g, '');
+    let d = raw.replace(/\D/g, '');
+    if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+    if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+    return d;
+  })();
+  const mobileValid = /^([6-9]\d{9}|\+\d{8,15})$/.test(mobileDigits);
 
   if (!open) return null;
 
@@ -112,9 +121,9 @@ function AddUserDialog({ open, onClose }: { open: boolean; onClose: () => void }
               together, which password managers specifically target). */}
           <div>
             <Label>Mobile number *</Label>
-            <Input className="mt-1" inputMode="tel" autoComplete="one-time-code" name="employee-mobile" placeholder="e.g. 98XXXXXXXX" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Input className="mt-1" inputMode="tel" autoComplete="one-time-code" name="employee-mobile" placeholder="e.g. 98XXXXXXXX or +33 6 12 34 56 78" value={phone} onChange={(e) => setPhone(e.target.value)} />
             {phone.trim() && !mobileValid
-              ? <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 10-digit mobile number</p>
+              ? <p className="mt-1 text-xs font-semibold text-red-600">Enter a 10-digit mobile, or an international number starting with + and the country code</p>
               : <p className="mt-1 text-xs text-muted-foreground">The employee signs in with this number.</p>}
           </div>
           <div><Label>Email (optional)</Label><Input className="mt-1" type="email" autoComplete="off" data-lpignore="true" data-1p-ignore value={email} onChange={(e) => setEmail(e.target.value)} /></div>
