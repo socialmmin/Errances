@@ -1,4 +1,5 @@
 'use client';
+import { waNumber } from '@/lib/utils';
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -112,7 +113,7 @@ export function VendorDialog({ vendor, category, destination, onClose, onSaved }
   const [saving, setSaving] = useState(false);
   const [bad, setBad] = useState<Record<string, boolean>>({});
   const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-  const phoneOk = f.phone.replace(/\D/g, '').slice(-10).length === 10;
+  const phoneOk = !!waNumber(f.phone);
 
   // How much of the form is filled: the two compulsory fields count most.
   const steps: [string, boolean][] = [
@@ -128,7 +129,7 @@ export function VendorDialog({ vendor, category, destination, onClose, onSaved }
   async function save() {
     const missing = { name: !f.name.trim(), phone: !phoneOk };
     setBad(missing);
-    if (missing.name || missing.phone) { toast(missing.name ? 'Enter the vendor name' : 'Enter a valid 10-digit mobile number', 'error'); return; }
+    if (missing.name || missing.phone) { toast(missing.name ? 'Enter the vendor name' : 'Enter a valid mobile number, e.g. 06 12 34 56 78 or +33 6 12 34 56 78', 'error'); return; }
     setSaving(true);
     try {
       const res = vendor ? await api.patch<{ id: string }>(`/vendor-book/vendors/${vendor.id}`, f) : await api.post<{ id: string }>('/vendor-book/vendors', f);
@@ -157,7 +158,7 @@ export function VendorDialog({ vendor, category, destination, onClose, onSaved }
             <p className={sectionTitle}><Building2 className="h-3.5 w-3.5 text-gold" />Vendor</p>
             <div className="mt-3 grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
               <Field id="v-name" label="Vendor name" required icon={Building2} bad={bad.name}><input id="v-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={f.category === 'hotel' ? 'e.g. Hotel Lake View' : f.category === 'transport' ? 'e.g. Sri Murugan Travels' : 'Vendor name'} className={fieldInput} /></Field>
-              <Field id="v-phone" label="Mobile number" required icon={Phone} bad={bad.phone}><input id="v-phone" value={f.phone} inputMode="tel" maxLength={14} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/[^\d+ ]/g, '') })} placeholder="98XXXXXXXX" className={fieldInput} /></Field>
+              <Field id="v-phone" label="Mobile number" required icon={Phone} bad={bad.phone}><input id="v-phone" value={f.phone} inputMode="tel" maxLength={20} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/[^\d+ ]/g, '') })} placeholder="06 12 34 56 78" className={fieldInput} /></Field>
               <Field id="v-person" label="Contact person" icon={UserRound}><input id="v-person" value={f.contactPerson} onChange={(e) => setF({ ...f, contactPerson: e.target.value })} placeholder="Optional" className={fieldInput} /></Field>
               <div><label htmlFor="v-dest" className={fieldLabel}>Destinations served</label><DestinationPicker value={f.destinations} onChange={(destinations) => setF({ ...f, destinations })} /></div>
             </div>

@@ -1,4 +1,5 @@
 'use client';
+import { waNumber } from '@/lib/utils';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -528,7 +529,7 @@ export function QuotationBuilder({ quotation }: { quotation?: Quotation }) {
   // Minimum fields for a quotation to be worth saving at all -- same gate the explicit submit
   // uses, so autosave never creates a near-empty draft just because someone typed a destination.
   function hasMinimumFields() {
-    const hasCustomer = !!leadId || (newCustomerName.trim().length > 0 && tenDigits(newCustomerPhone).length === 10);
+    const hasCustomer = !!leadId || (newCustomerName.trim().length > 0 && !!waNumber(newCustomerPhone));
     return hasCustomer && destination.trim().length > 0 && !!travelFrom && !!travelTo && adults > 0;
   }
 
@@ -567,7 +568,7 @@ export function QuotationBuilder({ quotation }: { quotation?: Quotation }) {
     // and the page moves to the first of them.
     const found: Record<string, string> = {};
     if (!newCustomerName.trim()) found.newCustomerName = 'Customer name is compulsory';
-    if (leadId ? !newCustomerPhone.trim() : tenDigits(newCustomerPhone).length !== 10) found.newCustomerPhone = newCustomerPhone.trim() ? 'Enter a valid 10-digit mobile number' : 'Mobile number is compulsory';
+    if (leadId ? !newCustomerPhone.trim() : !waNumber(newCustomerPhone)) found.newCustomerPhone = newCustomerPhone.trim() ? 'Enter a valid mobile number, e.g. 06 12 34 56 78 or +33 6 12 34 56 78' : 'Mobile number is compulsory';
     if (newCustomerEmail.trim() && !/^\S+@\S+\.\S+$/.test(newCustomerEmail.trim())) found.newCustomerEmail = 'This email address does not look right';
     if (!destination.trim()) found.destination = 'Destination is compulsory';
     if (!travelFrom) found.travelFrom = 'Check-in date is compulsory';
@@ -696,7 +697,7 @@ export function QuotationBuilder({ quotation }: { quotation?: Quotation }) {
           <p className="text-xs font-semibold text-foreground">{leadId ? 'Customer details — taken from the lead. To use a different customer, clear the lead above.' : "Customer details — not a lead yet? Type them here. We check the mobile number against existing leads first, so this never creates a duplicate."}</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1"><Label htmlFor="newCustomerName">Customer name <span className="text-red-600">*</span></Label><Input id="newCustomerName" value={newCustomerName} readOnly={!!leadId} aria-invalid={!!errors.newCustomerName} className={errors.newCustomerName ? bad : leadId ? 'bg-muted' : ''} onChange={(e) => { setNewCustomerName(e.target.value); clearError('newCustomerName'); }} placeholder="Customer name" /><FieldError msg={errors.newCustomerName} /></div>
-            <div className="space-y-1"><Label htmlFor="newCustomerPhone">Mobile number <span className="text-red-600">*</span></Label><Input id="newCustomerPhone" value={newCustomerPhone} readOnly={!!leadId} aria-invalid={!!errors.newCustomerPhone} className={errors.newCustomerPhone ? bad : leadId ? 'bg-muted' : ''} onChange={(e) => { setNewCustomerPhone(e.target.value.replace(/[^\d+ ]/g, '')); clearError('newCustomerPhone'); }} placeholder="10-digit mobile number, e.g. 98XXXXXXXX" inputMode="tel" maxLength={14} /><FieldError msg={errors.newCustomerPhone} /></div>
+            <div className="space-y-1"><Label htmlFor="newCustomerPhone">Mobile number <span className="text-red-600">*</span></Label><Input id="newCustomerPhone" value={newCustomerPhone} readOnly={!!leadId} aria-invalid={!!errors.newCustomerPhone} className={errors.newCustomerPhone ? bad : leadId ? 'bg-muted' : ''} onChange={(e) => { setNewCustomerPhone(e.target.value.replace(/[^\d+ ]/g, '')); clearError('newCustomerPhone'); }} placeholder="e.g. 06 12 34 56 78 or +33 6 12 34 56 78" inputMode="tel" maxLength={20} /><FieldError msg={errors.newCustomerPhone} /></div>
             <div className="space-y-1"><Label htmlFor="newCustomerEmail">Email <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="newCustomerEmail" type="email" value={newCustomerEmail} aria-invalid={!!errors.newCustomerEmail} className={errors.newCustomerEmail ? bad : ''} onChange={(e) => { setNewCustomerEmail(e.target.value); clearError('newCustomerEmail'); }} placeholder="name@example.com" /><FieldError msg={errors.newCustomerEmail} /></div>
             {!leadId && (
               <div className="space-y-1">

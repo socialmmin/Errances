@@ -16,6 +16,7 @@ import { useCreateLead, useAssignableUsers } from '@/hooks/use-leads';
 import { LeadInput } from '@/types/lead';
 import { useAuthStore } from '@/store/auth-store';
 import { DESTINATIONS } from '@/lib/destinations';
+import { PHONE_COUNTRIES, phoneWithCountry } from '@/lib/utils';
 
 const TRAVEL_TYPES = [
   { value: 'Couple', icon: Heart, tone: 'bg-rose-100 text-rose-600' },
@@ -58,6 +59,17 @@ function FieldLabel({ icon: Icon, children, required }: { icon: LucideIcon; chil
       {children}
       {required && <span className="text-red-500">*</span>}
     </Label>
+  );
+}
+
+// The country a phone number belongs to. The chosen one reads short ("FR +33") so it fits beside
+// the number; the others are listed by name.
+function CountryCode({ value, onChange }: { value: string; onChange: (code: string) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Country code"
+      className="h-10 w-[5.75rem] shrink-0 rounded-lg border border-input bg-muted/50 px-1.5 text-xs font-semibold text-foreground">
+      {PHONE_COUNTRIES.map((c) => <option key={c.iso} value={c.code}>{c.code === value ? `${c.iso} +${c.code}` : `${c.name} (+${c.code})`}</option>)}
+    </select>
   );
 }
 
@@ -130,8 +142,10 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState('33');
   const [whatsappSame, setWhatsappSame] = useState(true);
   const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [whatsappCountry, setWhatsappCountry] = useState('33');
   const [email, setEmail] = useState('');
   const [nationality, setNationality] = useState('');
   const [destinations, setDestinations] = useState<string[]>([]);
@@ -148,12 +162,16 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
   const [assignedTo, setAssignedTo] = useState(currentUserId);
   const [remarks, setRemarks] = useState('');
 
-  function step1Valid() { return firstName.trim().length > 0 && lastName.trim().length > 0 && phone.trim().length > 0; }
+  // Saved in full international form (+33612345678), whichever way it was typed.
+  const fullPhone = phoneWithCountry(phoneCountry, phone);
+  const fullWhatsapp = whatsappSame ? fullPhone : phoneWithCountry(whatsappCountry, whatsappNumber);
+  function step1Valid() { return firstName.trim().length > 0 && lastName.trim().length > 0 && !!fullPhone && (whatsappSame || !whatsappNumber.trim() || !!fullWhatsapp); }
   function step2Valid() { return destinations.length > 0 && !!travelFrom && !!travelTo && adults > 0; }
 
   function resetForm() {
     setStep(1);
     setFirstName(''); setLastName(''); setPhone(''); setWhatsappSame(true); setWhatsappNumber('');
+    setPhoneCountry('33'); setWhatsappCountry('33');
     setEmail(''); setNationality(''); setDestinations([]); setTravelFrom(''); setTravelTo('');
     setAdults(1); setChildren(0); setInfants(0); setBudget(0); setTravelType('');
     setSource('meta_ads'); setPriority('cold'); setAssignedTo(currentUserId); setRemarks('');
@@ -162,8 +180,8 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
   async function onSave(addAnother = false) {
     const payload: LeadInput = {
       customerName: `${firstName.trim()} ${lastName.trim()}`.trim(),
-      phone: phone.trim() || undefined,
-      whatsappNumber: (whatsappSame ? phone.trim() : whatsappNumber.trim()) || undefined,
+      phone: fullPhone || undefined,
+      whatsappNumber: fullWhatsapp || fullPhone || undefined,
       email: email.trim() || undefined,
       nationality: nationality.trim() || undefined,
       destination: destinations.join(', '),
@@ -235,9 +253,10 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
                 <div className="space-y-1">
                   <FieldLabel icon={PhoneIcon} required>Phone</FieldLabel>
                   <div className="flex gap-2">
-                    <span className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-input bg-muted/50 px-2.5 text-xs font-semibold text-muted-foreground">IN +91</span>
-                    <Input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="one-time-code" placeholder="98XXXXXXXX" />
+                    <CountryCode value={phoneCountry} onChange={setPhoneCountry} />
+                    <Input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="one-time-code" placeholder={PHONE_COUNTRIES.find((c) => c.code === phoneCountry)?.example} />
                   </div>
+                  {phone.trim() && !fullPhone && <p className="text-[11px] font-semibold text-red-600">Not a valid phone number</p>}
                 </div>
                 <div className="space-y-1"><FieldLabel icon={Mail}>Email</FieldLabel><Input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" /></div>
               </div>
@@ -254,8 +273,8 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
                 <MessageCircle className="h-4 w-4 shrink-0 text-emerald-600" />
                 <span className="text-sm font-medium text-foreground">WhatsApp same as phone number</span>
               </button>
-              {!whatsappSame && <div className="space-y-1"><FieldLabel icon={MessageCircle}>WhatsApp Number</FieldLabel><Input className={inputClass} value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} placeholder="10-digit WhatsApp number" /></div>}
-              <div className="space-y-1"><FieldLabel icon={Globe2}>Nationality</FieldLabel><Input className={inputClass} value={nationality} onChange={(e) => setNationality(e.target.value)} placeholder="e.g. Indian, British, Emirati" /></div>
+              {!whatsappSame && <div className="space-y-1"><FieldLabel icon={MessageCircle}>WhatsApp Number</FieldLabel><div className="flex gap-2"><CountryCode value={whatsappCountry} onChange={setWhatsappCountry} /><Input className={inputClass} value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} inputMode="tel" placeholder={PHONE_COUNTRIES.find((c) => c.code === whatsappCountry)?.example} /></div>{whatsappNumber.trim() && !fullWhatsapp && <p className="text-[11px] font-semibold text-red-600">Not a valid WhatsApp number</p>}</div>}
+              <div className="space-y-1"><FieldLabel icon={Globe2}>Nationality</FieldLabel><Input className={inputClass} value={nationality} onChange={(e) => setNationality(e.target.value)} placeholder="e.g. French, Belgian, British" /></div>
             </div>
           )}
 
