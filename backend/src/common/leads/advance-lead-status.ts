@@ -18,10 +18,14 @@ export async function advanceLeadStatus(pool: Pool, leadId: string | null | unde
   if (!leadId) return;
   const candidateIndex = FUNNEL.indexOf(candidate);
   if (candidateIndex < 0) return;
+  // status::text: the column is a typed list (lead_status) here, which array_position cannot
+  // compare with text -- without the cast the query failed and nothing ever advanced.
+  // array_position counts from 1 and is NULL for a status outside the funnel, so: only a lead in
+  // the funnel, and only one that sits before the candidate stage.
   await pool.query(
     `UPDATE leads SET status = $2, updated_at = now()
      WHERE id = $1 AND is_deleted = false
-       AND COALESCE(array_position($3::text[], status), -1) < $4`,
+       AND array_position($3::text[], status::text) - 1 < $4`,
     [leadId, candidate, FUNNEL, candidateIndex],
   ).catch(() => undefined);
 }

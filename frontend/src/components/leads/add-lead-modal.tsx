@@ -19,14 +19,17 @@ import { DESTINATIONS } from '@/lib/destinations';
 import { PHONE_COUNTRIES, phoneWithCountry } from '@/lib/utils';
 import { CountryCode } from '@/components/shared/country-code';
 
+// `value` is what the server stores (its travel_type list, lower case); `label` is what people read.
 const TRAVEL_TYPES = [
-  { value: 'Couple', icon: Heart, tone: 'bg-rose-100 text-rose-600' },
-  { value: 'Honeymoon', icon: HeartHandshake, tone: 'bg-amber-100 text-amber-600' },
-  { value: 'Family', icon: Users2, tone: 'bg-sky-100 text-sky-600' },
-  { value: 'Bachelors', icon: PartyPopper, tone: 'bg-violet-100 text-violet-600' },
-  { value: 'Corporate', icon: Briefcase, tone: 'bg-slate-200 text-slate-700' },
-  { value: 'Students', icon: GraduationCap, tone: 'bg-indigo-100 text-indigo-600' },
-  { value: 'Adventure', icon: Mountain, tone: 'bg-emerald-100 text-emerald-600' },
+  { value: 'solo', label: 'Solo', icon: UserRound, tone: 'bg-teal-100 text-teal-600' },
+  { value: 'couple', label: 'Couple', icon: Heart, tone: 'bg-rose-100 text-rose-600' },
+  { value: 'honeymoon', label: 'Honeymoon', icon: HeartHandshake, tone: 'bg-amber-100 text-amber-600' },
+  { value: 'family', label: 'Family', icon: Users2, tone: 'bg-sky-100 text-sky-600' },
+  { value: 'group', label: 'Friends / Group', icon: Users, tone: 'bg-orange-100 text-orange-600' },
+  { value: 'bachelors', label: 'Bachelors', icon: PartyPopper, tone: 'bg-violet-100 text-violet-600' },
+  { value: 'corporate', label: 'Corporate', icon: Briefcase, tone: 'bg-slate-200 text-slate-700' },
+  { value: 'students', label: 'Students', icon: GraduationCap, tone: 'bg-indigo-100 text-indigo-600' },
+  { value: 'adventure', label: 'Adventure', icon: Mountain, tone: 'bg-emerald-100 text-emerald-600' },
 ];
 // Matches the backend's lead_source enum exactly (no Google Ads/Instagram/Facebook as separate
 // values there -- Instagram/Facebook both fall under "Social Media" rather than inventing
@@ -305,7 +308,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
                   {TRAVEL_TYPES.map((t) => (
                     <button key={t.value} type="button" onClick={() => setTravelType(t.value === travelType ? '' : t.value)} className={`flex flex-col items-center gap-1.5 rounded-xl border p-2.5 transition-all ${travelType === t.value ? 'border-gold bg-gold/10 shadow-sm' : 'border-input hover:border-gold/50'}`}>
                       <div className={`grid h-8 w-8 place-items-center rounded-full ${t.tone}`}><t.icon className="h-4 w-4" /></div>
-                      <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">{t.value}</span>
+                      <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">{t.label}</span>
                     </button>
                   ))}
                 </div>

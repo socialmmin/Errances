@@ -17,6 +17,7 @@ import { RealtimeGateway } from '../../../common/realtime/realtime.gateway';
 import { PackagesService } from '../../packages/packages.service';
 import { PushService } from '../../../common/push/push.service';
 import { TwilioWhatsAppService, TWILIO_PSEUDO_ID } from './twilio-whatsapp.service';
+import { EnquiryState, EnquiryStep, detectLanguage, enquiryText, hasRealName, parseTravelDates, parseTravelType, parseTravellers, questionText, staffSummary, summaryText, travelTypeFallback, travelTypeLabel, travelTypeRows, welcomeText } from './enquiry-flow';
 
 interface WhatsAppReferral {
   source_url?: string;
@@ -1359,6 +1360,9 @@ export class WhatsAppBotService implements OnModuleInit {
       return;
     }
 
+    // In the middle of the enquiry questions (see startEnquiry): this message is the answer.
+    if (await this.continueEnquiry(config, from, leadId, contactName, message)) return;
+
     // Duration options arrive as a list row, or (3 or fewer options) as reply buttons -- same ids.
     const durButtonId = String(message?.interactive?.button_reply?.id || '');
     const listReplyId: string | undefined = message?.interactive?.list_reply?.id || (durButtonId.startsWith('dur:') ? durButtonId : undefined);
@@ -1534,9 +1538,165 @@ export class WhatsAppBotService implements OnModuleInit {
       if (matched) return;
     }
 
+    // Someone new writing in, with no itinerary to send them: welcome them and ask what trip they
+    // have in mind (a few questions), so sales starts from a complete request.
+    if (await this.startEnquiry(config, from, leadId, contactName, String(plainText || quickReplyText || ''))) return;
+
     // Any other message: answer by what the customer actually said (see replyByIntent).
     await this.replyByIntent(config, from, leadId, contactName, replyText, String(plainText || quickReplyText || '')).catch((err) => this.logger.error(`Intent reply failed for ${from}: ${err.message}`));
     await this.upsertConversation(from, 'consultant_assist', null, contactName, leadId);
+  }
+
+  // ---------------------------------------------------------------- enquiry questions
+
+  private async say(config: WhatsAppConfig, to: string, leadId: string | undefined, text: string) {
+    const result: any = await this.sendText(config, to, text);
+    await this.storeMessage(to, leadId ?? null, 'out', text, 'text', result?.messages?.[0]?.id).catch(() => undefined);
+  }
+
+  private async askEnquiryStep(config: WhatsAppConfig, to: string, leadId: string | undefined, state: EnquiryState, opts: { retry?: boolean; lead?: string } = {}) {
+    const lead = opts.lead ? `${opts.lead}\n\n` : '';
+    if (state.step !== 'type') return this.say(config, to, leadId, lead + questionText(state, state.step, opts.retry));
+    // The last question is a tappable list; if that cannot be sent, the same choices as numbers.
+    const t = enquiryText(state.lang);
+    const body = lead + questionText(state, 'type', opts.retry);
+    try {
+      const result: any = await this.sendInteractiveList(config, to, body, t.typeButton, travelTypeRows(state.lang), t.section);
+      await this.storeMessage(to, leadId ?? null, 'out', body, 'text', result?.messages?.[0]?.id, undefined, { list: { button: t.typeButton, rows: travelTypeRows(state.lang).map((r) => r.title) } }).catch(() => undefined);
+    } catch (err: any) {
+      this.logger.warn(`Enquiry type list could not be sent to ${to} (${err.message}) -- sent as numbered text`);
+      await this.say(config, to, leadId, lead + travelTypeFallback(state));
+    }
+  }
+
+  // Welcomes someone who has just written in and asks the first of the enquiry questions: their
+  // name (only when WhatsApp gave none), destination, departure date, travellers, type of trip.
+  // Not started when sales is already on it: a quotation or itinerary went out, staff are
+  // chatting, the lead already has its travel dates, or the questions were answered this month.
+  private async startEnquiry(config: WhatsAppConfig, from: string, leadId: string | undefined, contactName: string | undefined, text: string): Promise<boolean> {
+    if (!leadId) return false;
+    const { rows } = await this.pool.query(
+      `SELECT l.customer_name, l.status::text AS status, l.travel_from,
+              EXISTS (SELECT 1 FROM lead_requirements r WHERE r.lead_id = l.id AND r.source = 'whatsapp_enquiry' AND r.created_at > now() - interval '30 days') AS answered,
+              EXISTS (SELECT 1 FROM whatsapp_messages m WHERE m.phone_number = $2 AND m.direction = 'out' AND m.sent_by IS NOT NULL AND m.created_at > now() - interval '12 hours') AS staff_chatting,
+              EXISTS (SELECT 1 FROM whatsapp_logs w WHERE w.lead_id = l.id AND w.message_type = 'itinerary' AND w.is_deleted = false) AS has_itinerary,
+              EXISTS (SELECT 1 FROM quotations q WHERE q.lead_id = l.id) AS has_quotation
+         FROM leads l WHERE l.id = $1 AND l.is_deleted = false`, [leadId, from]);
+    const lead = rows[0];
+    if (!lead || lead.answered || lead.staff_chatting || lead.has_itinerary || lead.has_quotation || lead.travel_from) return false;
+    if (['quotation_sent', 'negotiation', 'booking_confirmed', 'won', 'lost', 'not_interested'].includes(lead.status)) return false;
+
+    const name = hasRealName(contactName) ? contactName!.trim() : hasRealName(lead.customer_name) ? String(lead.customer_name).trim() : null;
+    const steps: EnquiryStep[] = [...(name ? [] : ['name' as EnquiryStep]), 'destination', 'dates', 'travellers', 'type'];
+    const state: EnquiryState = { lang: detectLanguage(text, from), step: steps[0], steps, answers: {}, startedAt: new Date().toISOString(), retries: 0 };
+    await this.askEnquiryStep(config, from, leadId, state, { lead: welcomeText(state, name ? name.split(/\s+/)[0] : null) });
+    await this.upsertConversation(from, `enq_${state.step}`, { enquiry: state }, contactName, leadId);
+    this.logger.log(`Enquiry started with ${from} (${state.lang}, ${steps.length} questions)`);
+    return true;
+  }
+
+  // Takes this message as the answer to the question in progress, then asks the next one or
+  // finishes. Returns false when no enquiry is in progress (the usual handling carries on).
+  private async continueEnquiry(config: WhatsAppConfig, from: string, leadId: string | undefined, contactName: string | undefined, message: any): Promise<boolean> {
+    const listId: string | undefined = message?.interactive?.list_reply?.id;
+    const { rows } = await this.pool.query(`SELECT state, context, last_message_at FROM whatsapp_conversations WHERE phone_number = $1`, [from]);
+    const state: EnquiryState | undefined = rows[0]?.context?.enquiry;
+    if (!rows[0] || !String(rows[0].state).startsWith('enq_') || !state) {
+      // A late tap on the type list after the enquiry closed: nothing to do, and not a package pick.
+      return String(listId || '').startsWith('enq:');
+    }
+    // A person has taken the chat over since the questions began: the bot steps aside.
+    const { rows: staff } = await this.pool.query(
+      `SELECT 1 FROM whatsapp_messages WHERE phone_number = $1 AND direction = 'out' AND sent_by IS NOT NULL AND created_at > $2 LIMIT 1`, [from, state.startedAt]);
+    if (staff.length) { await this.upsertConversation(from, 'consultant_assist', {}, contactName, leadId); return false; }
+    // Back after a long silence: the half-finished answers are stale, so start over.
+    if (Date.now() - new Date(rows[0].last_message_at).getTime() > 12 * 60 * 60 * 1000) {
+      await this.upsertConversation(from, 'greeted', {}, contactName, leadId);
+      return false;
+    }
+
+    const text = String(message?.text?.body || message?.interactive?.list_reply?.title || message?.interactive?.button_reply?.title || message?.button?.text || '').trim();
+    // "Call me" / "rappelez-moi" at any point: a callback request, and the questions stop there.
+    if (/\b(call\s*(me|back)|callback|phone\s*me|ring\s*me|rappel(ez|er)?[- ]?moi|appel(ez|er)[- ]moi|me\s+rappeler|[êe]tre\s+rappel[ée])/i.test(text)) {
+      await this.saveEnquiry(from, leadId, state, false);
+      await this.upsertConversation(from, 'consultant_assist', {}, contactName, leadId);
+      await this.handleCallbackRequest(config, from, contactName, leadId, state.lang === 'fr' ? 'Merci. Notre conseiller voyage vous appellera très bientôt.' : undefined);
+      return true;
+    }
+    if (!text) {
+      await this.say(config, from, leadId, enquiryText(state.lang).unreadable);
+      await this.upsertConversation(from, `enq_${state.step}`, { enquiry: state }, contactName, leadId);
+      return true;
+    }
+
+    // An answer that cannot be what was asked ("?", "12" for a name) gets the question once more;
+    // the second time it is taken as given, so nobody gets stuck.
+    const usable = state.step === 'type' ? !!parseTravelType(listId, text)
+      : state.step === 'travellers' ? /\d|\p{L}{3,}/u.test(text)
+      : state.step === 'dates' ? /\d|\p{L}{3,}/u.test(text)
+      : /\p{L}{2,}/u.test(text);
+    if (!usable && state.retries < 1) {
+      state.retries += 1;
+      await this.askEnquiryStep(config, from, leadId, state, { retry: true });
+      await this.upsertConversation(from, `enq_${state.step}`, { enquiry: state }, contactName, leadId);
+      return true;
+    }
+    state.answers[state.step] = text.slice(0, 300);
+    if (state.step === 'type') state.travelType = parseTravelType(listId, text);
+    state.retries = 0;
+
+    const next = state.steps[state.steps.indexOf(state.step) + 1];
+    if (next) {
+      state.step = next;
+      await this.askEnquiryStep(config, from, leadId, state);
+      await this.upsertConversation(from, `enq_${state.step}`, { enquiry: state }, contactName, leadId);
+      return true;
+    }
+
+    // All answered: keep it on the lead, give the customer their request back, alert sales.
+    const name = await this.saveEnquiry(from, leadId, state, true);
+    const closing = summaryText(state, name.split(/\s+/)[0] || '');
+    const t = enquiryText(state.lang);
+    const result: any = await this.sendInteractiveButtons(config, from, closing, [{ id: 'durmore:no:', title: t.callButton }]).catch(() => this.sendText(config, from, closing));
+    await this.storeMessage(from, leadId ?? null, 'out', closing, 'text', result?.messages?.[0]?.id, undefined, { buttons: [{ type: 'QUICK_REPLY', text: t.callButton }] }).catch(() => undefined);
+    await this.upsertConversation(from, 'completed', { enquiryCompletedAt: new Date().toISOString() }, contactName, leadId);
+    await this.flagForFollowUp(from, leadId, name || contactName, 'New WhatsApp enquiry', staffSummary(state)).catch((err) => this.logger.error(`Enquiry alert failed for ${from}: ${err.message}`));
+    this.logger.log(`Enquiry completed by ${from}: ${staffSummary(state)}`);
+    return true;
+  }
+
+  // Writes the enquiry answers onto the lead: its name (if it had none), destination, dates,
+  // travellers and travel type, a requirement entry and a note with the customer's own words.
+  // `complete` false = the customer stopped part-way; what they did answer is still kept.
+  // Returns the customer's name.
+  private async saveEnquiry(from: string, leadId: string | undefined, state: EnquiryState, complete: boolean): Promise<string> {
+    if (!leadId) return state.answers.name ?? '';
+    const a = state.answers;
+    const dates = a.dates ? parseTravelDates(a.dates) : {};
+    const people = a.travellers ? parseTravellers(a.travellers) : {};
+    const { rows } = await this.pool.query(
+      `UPDATE leads SET
+         customer_name = CASE WHEN $2::text IS NOT NULL AND customer_name !~ '[[:alpha:]]{2}' THEN $2 ELSE customer_name END,
+         destination = COALESCE($3, destination),
+         travel_from = COALESCE($4::date, travel_from), travel_to = COALESCE($5::date, travel_to),
+         adults = COALESCE($6, adults), children = COALESCE($7, children),
+         travel_type = COALESCE($8::travel_type, travel_type), updated_at = now()
+       WHERE id = $1 AND is_deleted = false RETURNING customer_name`,
+      [leadId, a.name ? a.name.slice(0, 120) : null, a.destination ? a.destination.slice(0, 200) : null, dates.from ?? null, dates.to ?? null, people.adults ?? null, people.children ?? null, state.travelType ?? null],
+    ).catch((err) => { this.logger.error(`Could not save enquiry answers on lead ${leadId}: ${err.message}`); return { rows: [] as any[] }; });
+    const lines = [
+      a.destination && `Destination: ${a.destination}`, a.dates && `Departure: ${a.dates}`, a.travellers && `Travellers: ${a.travellers}`,
+      (state.travelType || a.type) && `Type of trip: ${travelTypeLabel(state.travelType, 'en') ?? a.type}`,
+    ].filter(Boolean);
+    if (lines.length) {
+      await this.pool.query(
+        `INSERT INTO lead_requirements (lead_id, destination, travel_from, travel_to, adults, children, notes, answers, source)
+         VALUES ($1, $2, $3, $4, COALESCE($5, 1), COALESCE($6, 0), $7, $8, $9)`,
+        [leadId, a.destination ?? null, dates.from ?? null, dates.to ?? null, people.adults ?? null, people.children ?? null, lines.join('\n'), JSON.stringify({ ...a, travelType: state.travelType ?? null, language: state.lang }), complete ? 'whatsapp_enquiry' : 'whatsapp_enquiry_partial'],
+      ).catch((err) => this.logger.error(`Could not save enquiry requirement for lead ${leadId}: ${err.message}`));
+      await this.pool.query(`INSERT INTO lead_notes (lead_id, body) VALUES ($1, $2)`, [leadId, `WhatsApp enquiry${complete ? '' : ' (not finished)'}\n${lines.join('\n')}`]).catch(() => undefined);
+    }
+    return String(rows[0]?.customer_name || a.name || '').trim();
   }
 
   // A message with one "Call our experts" button under it (tapping it books a callback).

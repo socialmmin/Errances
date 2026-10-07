@@ -12,7 +12,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { LEAD_STATUSES } from '@/lib/lead-statuses';
 import { MIN_REASON, ReasonFields, joinReason, needsReason } from '@/components/leads/reason-dialog';
 
-const TRAVEL_TYPES = ['family', 'couple', 'solo', 'group', 'corporate', 'honeymoon'];
+const TRAVEL_TYPES = ['solo', 'couple', 'honeymoon', 'family', 'group', 'bachelors', 'corporate', 'students', 'adventure'];
 const SOURCES = ['website', 'referral', 'walk_in', 'social_media', 'phone', 'whatsapp', 'agent', 'meta_ads', 'other'];
 
 const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground';

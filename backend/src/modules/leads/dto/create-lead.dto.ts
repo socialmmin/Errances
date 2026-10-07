@@ -1,6 +1,7 @@
 import { IsDateString, IsEmail, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
 
-const TRAVEL_TYPES = ['family', 'couple', 'solo', 'group', 'corporate', 'honeymoon'];
+const TRAVEL_TYPES = ['family', 'couple', 'solo', 'group', 'corporate', 'honeymoon', 'bachelors', 'students', 'adventure'];
 const SOURCES = ['website', 'referral', 'walk_in', 'social_media', 'phone', 'whatsapp', 'agent', 'meta_ads', 'other'];
 const PRIORITIES = ['strong', 'hot', 'cold', 'dead'];
 const STATUSES = ['interested', 'advance_paid', 'just_checking', 'invalid_number', 'wrong_number', 'duplicate', 'new', 'contacted', 'follow_up', 'qualified', 'quotation_sent', 'negotiation', 'booking_confirmed', 'won', 'no_response', 'not_interested', 'lost'];
@@ -20,7 +21,8 @@ export class CreateLeadDto {
   @IsOptional() @IsInt() @Min(0) children?: number;
   @IsOptional() @IsInt() @Min(0) infants?: number;
   @IsOptional() @IsInt() @Min(0) budget?: number;
-  @IsOptional() @IsIn(TRAVEL_TYPES) travelType?: string;
+  // Lower-cased first: the form used to send "Family", and the stored values are lower case.
+  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() || undefined : value)) @IsIn(TRAVEL_TYPES) travelType?: string;
   @IsOptional() @IsIn(SOURCES) source?: string;
   @IsOptional() @IsUUID() assignedTo?: string;
   @IsOptional() @IsIn(PRIORITIES) priority?: string;
