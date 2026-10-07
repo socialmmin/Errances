@@ -1,4 +1,5 @@
 'use client';
+import { waNumber } from '@/lib/utils';
 
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Moon, Plus, Send, Sun, Trash2, XCircle } from 'lucide-react';
@@ -98,7 +99,7 @@ export function DailyReportPanel() {
   function addNumber() {
     const n = newNumber.trim();
     if (!n) return;
-    if (!/^(\+?91)?[6-9]\d{9}$/.test(n.replace(/[\s-]/g, ''))) { toast('Enter a valid 10-digit Indian mobile number', 'error'); return; }
+    if (!waNumber(n)) { toast('Enter a valid WhatsApp number, e.g. 06 12 34 56 78 or +33 6 12 34 56 78', 'error'); return; }
     setNumbers((list) => [...list, n]); setNewNumber('');
   }
 

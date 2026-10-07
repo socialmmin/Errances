@@ -25,6 +25,7 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { MetaModule } from './modules/integrations/meta/meta.module';
 import { WhatsAppBotModule } from './modules/integrations/whatsapp/whatsapp-bot.module';
 import { DailyReportModule } from './modules/reporting/daily-report.module';
+import { BroadcastsModule } from './modules/broadcasts/broadcasts.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { DailyReportModule } from './modules/reporting/daily-report.module';
     MetaModule,
     WhatsAppBotModule,
     DailyReportModule,
+    BroadcastsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuditedThrottlerGuard }],
 })

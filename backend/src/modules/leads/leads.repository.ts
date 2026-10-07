@@ -440,15 +440,17 @@ export class LeadsRepository {
 
   async findByContactNumber(number: string) {
     const digits = number.replace(/[^0-9]/g, '');
-    const normalized = digits.length > 10 ? digits.slice(-10) : digits;
+    // The last nine digits: what 06 12 34 56 78 and +33 6 12 34 56 78 (the same French mobile, as
+    // typed by staff and as WhatsApp reports it) have in common. Shorter numbers must match whole.
+    const normalized = digits.length > 9 ? digits.slice(-9) : digits;
     if (!normalized) return null;
     const { rows } = await this.pool.query(
       `SELECT * FROM leads
        WHERE is_deleted = false
          AND (
-           right(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $1
-           OR right(regexp_replace(COALESCE(whatsapp_number, ''), '[^0-9]', '', 'g'), 10) = $1
-           OR right(regexp_replace(COALESCE(whatsapp_contact_id, ''), '[^0-9]', '', 'g'), 10) = $1
+           right(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 9) = $1
+           OR right(regexp_replace(COALESCE(whatsapp_number, ''), '[^0-9]', '', 'g'), 9) = $1
+           OR right(regexp_replace(COALESCE(whatsapp_contact_id, ''), '[^0-9]', '', 'g'), 9) = $1
          )
        ORDER BY created_at DESC LIMIT 1`,
       [normalized],

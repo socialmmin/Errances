@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
+import { TwilioWhatsAppService, TWILIO_PSEUDO_ID } from '../integrations/whatsapp/twilio-whatsapp.service';
 import { PG_POOL } from '../../common/db/pool.module';
 import { MetaService } from '../integrations/meta/meta.service';
 import { MetaCapiService } from '../integrations/meta/meta-capi.service';
-import { normalizeIndianMobile } from '../integrations/whatsapp/whatsapp-bot.service';
+import { waNumber } from '../integrations/whatsapp/whatsapp-bot.service';
 import { boardSections, workBoardRows } from '../../common/work-board';
 
 interface ReportNumbers {
@@ -140,6 +141,7 @@ export class DailyReportService implements OnModuleInit {
     private config: ConfigService,
     private metaService: MetaService,
     private metaCapi: MetaCapiService,
+    private twilio: TwilioWhatsAppService,
   ) {}
 
   onModuleInit() {
@@ -211,7 +213,7 @@ export class DailyReportService implements OnModuleInit {
   }
 
   async saveSettings(input: { phoneNumbers: string[]; sendTimes: string[]; enabled: boolean; includedSections?: string[] }) {
-    const numbers = input.phoneNumbers.map((n) => normalizeIndianMobile(n)).filter((n): n is string => !!n);
+    const numbers = input.phoneNumbers.map((n) => waNumber(n)).filter((n): n is string => !!n);
     if (input.enabled && !numbers.length) throw new BadRequestException('Add at least one valid WhatsApp number before enabling');
     const times = (input.sendTimes || []).filter((t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t));
     if (input.enabled && !times.length) throw new BadRequestException('Add at least one send time');
@@ -413,12 +415,13 @@ export class DailyReportService implements OnModuleInit {
   }
 
   async sendTest(phone: string) {
-    const to = normalizeIndianMobile(phone);
+    const to = waNumber(phone);
     if (!to) throw new BadRequestException('Enter a valid WhatsApp number');
     return this.sendNow({ to: [to], triggeredBy: 'test' });
   }
 
   private async getConfig() {
+    if (this.twilio.isConfigured()) return { phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token: TWILIO_PSEUDO_ID };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`,
     );
@@ -588,7 +591,7 @@ export class DailyReportService implements OnModuleInit {
       employee: { ...employee },
       employees: rows.map((u) => {
         const x: any = byId.get(u.id) ?? {};
-        const mobile = normalizeIndianMobile(x.phone ?? '');
+        const mobile = waNumber(x.phone ?? '');
         const k = mobile ? mobile.slice(-10) : '';
         const b = boardSections(u);
         const l: any = k ? last.get(k) : null;
@@ -617,7 +620,7 @@ export class DailyReportService implements OnModuleInit {
     const config = await this.getConfig();
     if (!config?.business_account_id) throw new BadRequestException('WhatsApp Business Account ID is missing in Settings');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: def.name, language: 'en_US', category: 'UTILITY', components: [{ type: 'BODY', text: def.body, example: { body_text: [def.example] } }] }),
@@ -639,7 +642,7 @@ export class DailyReportService implements OnModuleInit {
     const config = await this.getConfig();
     if (!config) throw new BadRequestException('WhatsApp is not configured');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${current.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${current.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await res.json();
     if (!res.ok) throw new BadRequestException(data?.error?.message || 'Could not check template status');
     await this.pool.query(`UPDATE utility_templates SET template_status=$2, template_rejection_reason=$3, checked_at=now() WHERE kind=$1`,
@@ -650,7 +653,7 @@ export class DailyReportService implements OnModuleInit {
   private async sendTemplate(config: { phone_number_id: string; access_token: string }, to: string, templateName: string, params: string[], messageType: string, triggeredBy: string) {
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
     try {
-      const res = await fetch(`https://graph.facebook.com/${version}/${config.phone_number_id}/messages`, {
+      const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.phone_number_id}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template: { name: templateName, language: { code: 'en_US' }, components: [{ type: 'body', parameters: params.map((p) => ({ type: 'text', text: String(p).replace(/\s+/g, ' ').slice(0, 300) || '-' })) }] } }),
@@ -683,10 +686,10 @@ export class DailyReportService implements OnModuleInit {
     let sent = 0; const failed: string[] = []; let skipped = 0;
     for (const u of rows) {
       const x: any = byId.get(u.id) ?? {};
-      const mobile = normalizeIndianMobile(x.phone ?? '');
+      const mobile = waNumber(x.phone ?? '');
       if (!mobile) { if (opts.userId) throw new BadRequestException('This employee has no valid mobile number in their profile'); skipped++; continue; }
       if (!opts.userId && x.daily_report_enabled === false) { skipped++; continue; }
-      const err = await this.sendTemplate(config, `91${mobile.slice(-10)}`, tpl.templateName, this.employeeParams(u, dateLabel), 'employee_report', opts.triggeredBy ?? 'manual');
+      const err = await this.sendTemplate(config, mobile, tpl.templateName, this.employeeParams(u, dateLabel), 'employee_report', opts.triggeredBy ?? 'manual');
       if (err) failed.push(`${u.full_name}: ${err}`); else sent++;
     }
     return { sent, failed, skipped };
@@ -697,7 +700,7 @@ export class DailyReportService implements OnModuleInit {
     if (!config?.business_account_id) throw new BadRequestException('WhatsApp Business Account ID is missing in Settings');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
     const templateName = 'crm_daily_admin_report_v2';
-    const res = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: templateName, language: 'en_US', category: 'UTILITY', components: [{ type: 'BODY', text: BODY_V2, example: { body_text: [EXAMPLE_V2] } }] }),
@@ -717,7 +720,7 @@ export class DailyReportService implements OnModuleInit {
     const config = await this.getConfig();
     if (!config) throw new BadRequestException('WhatsApp is not configured');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${settings.newLayout.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${settings.newLayout.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await res.json();
     if (!res.ok) throw new BadRequestException(data?.error?.message || 'Could not check template status');
     await this.pool.query(`UPDATE daily_report_settings SET layout2_status=$1, layout2_rejection=$2, updated_at=now() WHERE id=true`, [String(data.status || settings.newLayout.status).toUpperCase(), data.rejected_reason ?? null]);
@@ -734,7 +737,7 @@ export class DailyReportService implements OnModuleInit {
     // -- confirmed directly against the Graph API: it needs genuine trailing text, not just a
     // period, after the last variable. Hence the closing sentence in BODY_TEXT instead of ending on {{10}}.
     const bodyText = BODY_TEXT;
-    const res = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -766,7 +769,7 @@ export class DailyReportService implements OnModuleInit {
     const config = await this.getConfig();
     if (!config) throw new BadRequestException('WhatsApp is not configured');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${settings.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${settings.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await res.json();
     if (!res.ok) throw new BadRequestException(data?.error?.message || 'Could not check template status');
     const status = String(data.status || settings.templateStatus).toUpperCase();
@@ -790,7 +793,7 @@ export class DailyReportService implements OnModuleInit {
       const params = await this.mdParams(await this.workRows(), this.dateLabel());
       const triggeredBy = opts.triggeredBy ?? 'manual';
       let sent = 0; const failed: string[] = [];
-      for (const to of recipients) { const err = await this.sendTemplate(config, to, work.templateName, params, 'daily_report', triggeredBy); if (err) failed.push(`${to}: ${err}`); else sent++; }
+      for (const to of recipients) { const err = await this.sendTemplate(config, waNumber(to) || to, work.templateName, params, 'daily_report', triggeredBy); if (err) failed.push(`${to}: ${err}`); else sent++; }
       if (triggeredBy !== 'test') await this.pool.query(`UPDATE daily_report_settings SET last_sent_date=$1, updated_at=now() WHERE id=true`, [this.todayIst()]);
       return { sent, failed };
     }
@@ -811,12 +814,12 @@ export class DailyReportService implements OnModuleInit {
     const errors: string[] = [];
     for (const to of recipients) {
       try {
-        const res = await fetch(`https://graph.facebook.com/${version}/${config.phone_number_id}/messages`, {
+        const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.phone_number_id}/messages`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messaging_product: 'whatsapp',
-            to,
+            to: waNumber(to) || to,
             type: 'template',
             template: { name: templateName, language: { code: 'en_US' }, components: [{ type: 'body', parameters: params.map((p) => ({ type: 'text', text: p })) }] },
           }),

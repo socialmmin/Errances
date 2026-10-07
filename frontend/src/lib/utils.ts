@@ -21,3 +21,15 @@ export function formatPhone(raw?: string | null): string {
   if (/^[6-9]\d{9}$/.test(local)) return local;
   return `+${digits}`;
 }
+
+// A phone number as WhatsApp wants it (country code + number, digits only), or null if it is not
+// one. Same rule as the server's waNumber: Indian mobiles get 91, a 10-digit number starting with
+// 0 is French (06 12 34 56 78 -> 33612345678), anything else must carry its country code.
+export function waNumber(raw?: string | null): string | null {
+  let d = String(raw || '').replace(/\D/g, '');
+  const local = d.replace(/^(91|0)(?=\d{10}$)/, '');
+  if (/^[6-9]\d{9}$/.test(local)) return `91${local}`;
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.length === 10 && d.startsWith('0')) d = `33${d.slice(1)}`;
+  return /^[1-9]\d{7,14}$/.test(d) ? d : null;
+}

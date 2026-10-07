@@ -6,9 +6,10 @@ import { QuotationsService } from './quotations.service';
 import { QuotationsRepository } from './quotations.repository';
 import { BranchAccessService } from '../../common/guards/branch-access.service';
 import { PushModule } from '../../common/push/push.module';
+import { TwilioModule } from '../integrations/whatsapp/twilio.module';
 
 @Module({
-  imports: [PushModule],
+  imports: [PushModule, TwilioModule],
   controllers: [PublicQuotationsController, ItemSuggestionsController, QuotationsController],
   providers: [QuotationsService, QuotationsRepository, BranchAccessService],
 })

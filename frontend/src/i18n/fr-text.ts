@@ -7,5 +7,6 @@ import { part4 } from './fr/part4';
 import { part5 } from './fr/part5';
 import { part6 } from './fr/part6';
 import { part7 } from './fr/part7';
+import { part8 } from './fr/part8';
 
-export const frText: Record<string, string> = { ...part1, ...part2, ...part3, ...part4, ...part5, ...part6, ...part7 };
+export const frText: Record<string, string> = { ...part1, ...part2, ...part3, ...part4, ...part5, ...part6, ...part7, ...part8 };

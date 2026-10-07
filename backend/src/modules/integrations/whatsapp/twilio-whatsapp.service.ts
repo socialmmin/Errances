@@ -1,11 +1,26 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { Pool } from 'pg';
 import { PG_POOL } from '../../../common/db/pool.module';
+import { R2Service } from '../../../common/r2/r2.service';
 
 type Params = Record<string, string>;
 type CloudPayload = Record<string, any>;
+
+// The ids the CRM's WhatsApp settings carry while Twilio is the sender (in place of Meta's phone
+// number id, business account id and token); graphFetch recognises calls addressed to them.
+export const TWILIO_PSEUDO_ID = 'twilio';
+
+export interface TemplateStatusEvent { contentSid: string; name: string; status: string; reason: string | null }
+// How a CRM template's parameters (Meta's numbering) land on the Twilio Content variables.
+interface TemplateMap { bodyVars: number; mediaVar: number | null; headerFormat: string | null; buttonVars: Record<string, number>; def: any }
+
+// Twilio approval states in the CRM's (Meta's) wording.
+const APPROVAL_STATUS: Record<string, string> = {
+  approved: 'APPROVED', rejected: 'REJECTED', paused: 'PAUSED', disabled: 'DISABLED',
+  pending: 'PENDING', received: 'PENDING', submitted: 'PENDING', unsubmitted: 'PENDING',
+};
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // WhatsApp messages through Twilio are capped at 1,600 characters per message.
@@ -26,12 +41,24 @@ const TWILIO_ERRORS: Record<number, string> = {
 // and status webhooks back into the Cloud API's webhook shape, so leads, the inbox, menus and the
 // itinerary logic all run unchanged.
 @Injectable()
-export class TwilioWhatsAppService {
+export class TwilioWhatsAppService implements OnModuleInit {
   private logger = new Logger('TwilioWhatsApp');
   private contentCache = new Map<string, string>();
   private healthCache: { at: number; value: TwilioHealth | null } = { at: 0, value: null };
+  private statusListeners: ((e: TemplateStatusEvent) => void | Promise<void>)[] = [];
 
-  constructor(private config: ConfigService, @Inject(PG_POOL) private pool: Pool) {}
+  constructor(private config: ConfigService, @Inject(PG_POOL) private pool: Pool, private r2: R2Service) {}
+
+  // Meta pushes template decisions by webhook; Twilio does not, so pending templates are checked
+  // every 5 minutes and a decision is announced to the CRM the same way (see onTemplateStatus).
+  onModuleInit() {
+    if (!this.isConfigured()) return;
+    setInterval(() => this.checkPendingTemplates().catch((e) => this.logger.warn(`Template status check failed: ${e.message}`)), 5 * 60 * 1000);
+  }
+
+  onTemplateStatus(listener: (e: TemplateStatusEvent) => void | Promise<void>) {
+    this.statusListeners.push(listener);
+  }
 
   private get sid() { return (this.config.get<string>('TWILIO_ACCOUNT_SID') || '').trim(); }
   private get token() { return (this.config.get<string>('TWILIO_AUTH_TOKEN') || '').trim(); }
@@ -67,7 +94,9 @@ export class TwilioWhatsAppService {
     if (['document', 'image', 'video', 'audio'].includes(type)) {
       const m = payload[type] || {};
       if (!m.link) throw new Error('WhatsApp media send has no file link');
-      return this.postMessage(to, { body: m.caption ? String(m.caption).slice(0, TWILIO_BODY_LIMIT) : undefined, media: [String(m.link)] });
+      // Through our own short link, whose last part is the file name the customer sees.
+      const media = this.mediaUrl(await this.mediaLink({ url: String(m.link) }, m.filename || defaultFileName(type, String(m.link))));
+      return this.postMessage(to, { body: m.caption ? String(m.caption).slice(0, TWILIO_BODY_LIMIT) : undefined, media: [media] });
     }
     if (type === 'interactive') {
       const { contentSid, vars } = await this.interactiveContent(payload.interactive);
@@ -76,7 +105,7 @@ export class TwilioWhatsAppService {
     if (type === 'template') {
       const mapped = await this.mappedTemplate(String(payload.template?.name || ''));
       if (!mapped) throw new Error(`The WhatsApp template "${payload.template?.name}" is not set up in Twilio yet`);
-      return this.postMessage(to, { contentSid: mapped, vars: this.templateVariables(payload.template) });
+      return this.postMessage(to, { contentSid: mapped.sid, vars: await this.templateVariables(payload.template, mapped.map) });
     }
     throw new Error(`Unsupported WhatsApp message type for Twilio: ${type}`);
   }
@@ -211,16 +240,17 @@ export class TwilioWhatsAppService {
     return null;
   }
 
-  // Business-initiated templates: a CRM template name -> its approved Twilio Content.
-  private async mappedTemplate(name: string): Promise<string | null> {
+  // Business-initiated templates: a CRM template name -> its Twilio Content and variable layout.
+  private async mappedTemplate(name: string): Promise<{ sid: string; map: TemplateMap | null } | null> {
     if (!name) return null;
-    const { rows } = await this.pool.query(`SELECT content_sid FROM twilio_contents WHERE key = $1`, [`template:${name}`]);
-    return rows[0]?.content_sid ?? null;
+    const { rows } = await this.pool.query(`SELECT content_sid, meta FROM twilio_contents WHERE key = $1`, [`template:${name}`]);
+    return rows[0] ? { sid: rows[0].content_sid, map: rows[0].meta ?? null } : null;
   }
 
-  // Cloud API template components -> Twilio content variables: body text parameters become {{1}}..{{n}}
-  // in order, a header document/image link is passed as the next variable.
-  private templateVariables(t: any): Record<string, string> {
+  // Cloud API template components -> Twilio content variables: body parameters keep their numbers
+  // {{1}}..{{n}}; the header file and dynamic link buttons go to the variables recorded for them
+  // when the template was created (see createTemplate).
+  private async templateVariables(t: any, map: TemplateMap | null): Promise<Record<string, string>> {
     const vars: Record<string, string> = {};
     let i = 1;
     for (const c of t?.components ?? []) {
@@ -228,11 +258,241 @@ export class TwilioWhatsAppService {
     }
     for (const c of t?.components ?? []) {
       if (c.type === 'header') for (const p of c.parameters ?? []) {
-        const link = p.document?.link || p.image?.link || p.video?.link;
-        if (link) vars[String(i++)] = String(link);
+        const file = p.document || p.image || p.video;
+        if (!file?.link) continue;
+        const kind = p.document ? 'document' : p.image ? 'image' : 'video';
+        vars[String(map?.mediaVar ?? i++)] = await this.mediaLink({ url: String(file.link) }, file.filename || defaultFileName(kind, String(file.link)));
+      }
+      if (c.type === 'button' && c.sub_type === 'url' && map?.buttonVars?.[String(c.index)]) {
+        vars[String(map.buttonVars[String(c.index)])] = String(c.parameters?.[0]?.text ?? '');
       }
     }
     return vars;
+  }
+
+  // ---------------------------------------------------------------- media links
+
+  mediaUrl(suffix: string) { return `${this.apiBase()}/api/wa-media/${suffix}`; }
+
+  // A short public link to a file, for Twilio to fetch when it sends it: "<id>/<file name>".
+  // Files kept by the CRM are linked by object key (never expires while kept); other links are
+  // fetched when Twilio asks. Links stop working after 30 days unless kept (template samples).
+  async mediaLink(source: { objectKey?: string; url?: string }, filename: string, keep = false): Promise<string> {
+    let objectKey = source.objectKey ?? null;
+    let url = source.url ?? null;
+    const prefix = `${this.apiBase()}/api/wa-media/`;
+    if (url?.startsWith(prefix)) return url.slice(prefix.length);
+    if (url && !objectKey) {
+      const own = /\/api\/files\/builtin\/([^/?#]+)\//.exec(url);
+      const key = own ? this.r2.verifyLink(own[1], 'get')?.key : null;
+      if (key) { objectKey = key; url = null; }
+    }
+    const id = randomBytes(12).toString('base64url');
+    const name = safeFileName(filename);
+    await this.pool.query(`INSERT INTO wa_media_links (id, object_key, url, filename, keep) VALUES ($1, $2, $3, $4, $5)`, [id, objectKey, url, name, keep]);
+    return `${id}/${encodeURIComponent(name)}`;
+  }
+
+  async mediaFile(id: string): Promise<{ body: Buffer; contentType: string; filename: string } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT object_key, url, filename, content_type FROM wa_media_links WHERE id = $1 AND (keep OR created_at > now() - interval '30 days')`, [id]);
+    const link = rows[0];
+    if (!link) return null;
+    if (link.object_key) {
+      const obj = await this.r2.getObject(link.object_key);
+      return obj ? { body: obj.body, contentType: link.content_type || obj.contentType, filename: link.filename } : null;
+    }
+    const res = await fetch(link.url).catch(() => null);
+    if (!res?.ok) return null;
+    return { body: Buffer.from(await res.arrayBuffer()), contentType: link.content_type || res.headers.get('content-type') || 'application/octet-stream', filename: link.filename };
+  }
+
+  // ---------------------------------------------------------------- templates
+
+  // A CRM template definition in Meta's format -> a Twilio Content, submitted to WhatsApp for
+  // approval. Body text and its examples carry over as they are; a document/image header becomes
+  // the Content's media (a fixed address on this API plus a variable); link buttons with a dynamic
+  // ending get a variable of their own; quick replies answer with their own text.
+  async createTemplate(def: any): Promise<{ id: string; status: string; category: string }> {
+    const name = String(def?.name || '').trim();
+    if (!/^[a-z0-9_]+$/.test(name)) throw new Error('Template names may only use lowercase letters, digits and _');
+    const category = String(def?.category || 'UTILITY').toUpperCase();
+    const components: any[] = def?.components ?? [];
+    const header = components.find((c) => c.type === 'HEADER');
+    const bodyPart = components.find((c) => c.type === 'BODY');
+    const footer = components.find((c) => c.type === 'FOOTER');
+    const buttons: any[] = components.filter((c) => c.type === 'BUTTONS').flatMap((c) => c.buttons ?? []);
+
+    let body = String(bodyPart?.text || '').trim();
+    if (!body) throw new Error('The template has no message text');
+    const variables: Record<string, string> = {};
+    const bodyVars = Math.max(0, ...[...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1])));
+    const bodyExample: any[] = bodyPart?.example?.body_text?.[0] ?? [];
+    for (let i = 1; i <= bodyVars; i++) variables[String(i)] = String(bodyExample[i - 1] ?? '').trim() || `sample ${i}`;
+    let next = bodyVars + 1;
+
+    if (header?.format === 'TEXT' && header.text) {
+      if (/\{\{/.test(header.text)) throw new Error('Template headers with variables are not supported');
+      body = `*${header.text}*\n\n${body}`;
+    }
+    let media: string[] | undefined;
+    let mediaVar: number | null = null;
+    const headerFormat = header && ['DOCUMENT', 'IMAGE', 'VIDEO'].includes(header.format) ? String(header.format) : null;
+    if (headerFormat) {
+      const handle = String(header.example?.header_handle?.[0] || '');
+      if (!handle.startsWith('twsample:')) throw new Error('The template sample file is missing');
+      const sampleKey = handle.slice('twsample:'.length);
+      mediaVar = next++;
+      variables[String(mediaVar)] = await this.mediaLink({ objectKey: sampleKey }, defaultFileName(headerFormat.toLowerCase(), sampleKey), true);
+      media = [`${this.apiBase()}/api/wa-media/{{${mediaVar}}}`];
+    }
+
+    const buttonVars: Record<string, number> = {};
+    const actions = buttons.map((b, index) => {
+      const title = String(b.text || '').slice(0, 25);
+      if (b.type === 'QUICK_REPLY') return { type: 'QUICK_REPLY', title, id: title };
+      if (b.type === 'PHONE_NUMBER') return { type: 'PHONE_NUMBER', title, phone: String(b.phone_number) };
+      if (b.type === 'URL') {
+        let url = String(b.url || '');
+        if (url.includes('{{1}}')) {
+          const v = next++;
+          const staticPart = url.split('{{1}}')[0];
+          const example = String(b.example?.[0] || '');
+          buttonVars[String(index)] = v;
+          variables[String(v)] = (example.startsWith(staticPart) ? example.slice(staticPart.length) : '') || 'sample';
+          url = url.replace('{{1}}', `{{${v}}}`);
+        }
+        return { type: 'URL', title, url };
+      }
+      throw new Error(`Button type ${b.type} is not supported`);
+    });
+
+    const quickReplies = actions.filter((a) => a.type === 'QUICK_REPLY');
+    const links = actions.filter((a) => a.type !== 'QUICK_REPLY');
+    let types: Record<string, unknown>;
+    if (media || (quickReplies.length && links.length)) {
+      types = { 'twilio/card': { title: body, ...(footer?.text ? { subtitle: String(footer.text).slice(0, 60) } : {}), ...(media ? { media } : {}), ...(actions.length ? { actions } : {}) } };
+    } else if (quickReplies.length) {
+      types = { 'twilio/quick-reply': { body, actions: quickReplies.map((a: any) => ({ title: a.title, id: a.id })) } };
+    } else if (links.length) {
+      types = { 'twilio/call-to-action': { body, actions: links } };
+    } else {
+      types = { 'twilio/text': { body } };
+    }
+
+    const language = String(def?.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+    const createRes = await fetch('https://content.twilio.com/v1/Content', {
+      method: 'POST',
+      headers: { Authorization: this.authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ friendly_name: name, language, variables, types }),
+    });
+    const created: any = await createRes.json().catch(() => ({}));
+    if (!createRes.ok || !created?.sid) throw new Error(`Twilio did not accept the template: ${created?.message || createRes.status}`);
+    const approvalRes = await fetch(`https://content.twilio.com/v1/Content/${created.sid}/ApprovalRequests/whatsapp`, {
+      method: 'POST',
+      headers: { Authorization: this.authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, category }),
+    });
+    const approval: any = await approvalRes.json().catch(() => ({}));
+    if (!approvalRes.ok) {
+      await fetch(`https://content.twilio.com/v1/Content/${created.sid}`, { method: 'DELETE', headers: { Authorization: this.authHeader() } }).catch(() => undefined);
+      throw new Error(`WhatsApp approval request failed: ${approval?.message || approvalRes.status}`);
+    }
+    const map: TemplateMap = { bodyVars, mediaVar, headerFormat, buttonVars, def: { name, language: def?.language || 'en_US', category, components } };
+    const status = APPROVAL_STATUS[String(approval?.status || 'pending').toLowerCase()] || 'PENDING';
+    await this.pool.query(
+      `INSERT INTO twilio_contents (key, content_sid, name, status, category, meta, checked_at) VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (key) DO UPDATE SET content_sid = $2, name = $3, status = $4, category = $5, meta = $6, rejection_reason = NULL, checked_at = now(), created_at = now()`,
+      [`template:${name}`, created.sid, name, status, category, JSON.stringify(map)],
+    );
+    this.logger.log(`Template ${name} submitted to WhatsApp through Twilio (${created.sid})`);
+    return { id: created.sid, status, category };
+  }
+
+  // Approval state of a template's Content, kept in twilio_contents; a change is announced.
+  async templateStatus(contentSid: string) {
+    const res = await fetch(`https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests`, { headers: { Authorization: this.authHeader() } });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Could not read the template status: ${data?.message || res.status}`);
+    const wa = data?.whatsapp ?? {};
+    const status = APPROVAL_STATUS[String(wa.status || 'pending').toLowerCase()] || 'PENDING';
+    const reason = wa.rejection_reason ? String(wa.rejection_reason) : null;
+    const { rows } = await this.pool.query(`SELECT name, status, category FROM twilio_contents WHERE content_sid = $1`, [contentSid]);
+    const known = rows[0];
+    if (known) {
+      await this.pool.query(`UPDATE twilio_contents SET status = $2, rejection_reason = $3, category = COALESCE($4, category), checked_at = now() WHERE content_sid = $1`, [contentSid, status, reason, wa.category ? String(wa.category).toUpperCase() : null]);
+      if (known.status !== status) {
+        for (const listener of this.statusListeners) await Promise.resolve(listener({ contentSid, name: known.name, status, reason })).catch((e) => this.logger.warn(`Template status listener failed: ${e.message}`));
+      }
+    }
+    return { id: contentSid, name: wa.name || known?.name || null, status, category: wa.category ? String(wa.category).toUpperCase() : known?.category ?? null, language: 'en_US', rejected_reason: reason || 'NONE', quality_score: null, last_updated_time: new Date().toISOString() };
+  }
+
+  private async checkPendingTemplates() {
+    const { rows } = await this.pool.query(`SELECT content_sid FROM twilio_contents WHERE key LIKE 'template:%' AND COALESCE(status, 'PENDING') = 'PENDING'`);
+    for (const r of rows) await this.templateStatus(r.content_sid).catch((e) => this.logger.warn(`Status check for ${r.content_sid} failed: ${e.message}`));
+  }
+
+  private async templatesByName(name: string) {
+    const { rows } = await this.pool.query(`SELECT content_sid, name, meta FROM twilio_contents WHERE key = $1`, [`template:${name}`]);
+    if (!rows[0]) return [];
+    const s = await this.templateStatus(rows[0].content_sid);
+    return [{ ...s, name: rows[0].name, language: rows[0].meta?.def?.language || 'en_US', components: rows[0].meta?.def?.components ?? [] }];
+  }
+
+  private async deleteTemplate(name: string) {
+    const { rows } = await this.pool.query(`DELETE FROM twilio_contents WHERE key = $1 RETURNING content_sid`, [`template:${name}`]);
+    for (const r of rows) await fetch(`https://content.twilio.com/v1/Content/${r.content_sid}`, { method: 'DELETE', headers: { Authorization: this.authHeader() } }).catch(() => undefined);
+    return { success: true };
+  }
+
+  // ---------------------------------------------------------------- Meta Graph API stand-in
+
+  private uploadSessions = new Map<string, string>();
+
+  // The CRM's modules call Meta's WhatsApp API (graph.facebook.com) directly: send a message, upload
+  // a template sample, create / look up / delete a template, read a template's status. While Twilio
+  // is the sender their settings carry TWILIO_PSEUDO_ID in place of Meta's ids, and this answers
+  // those calls through Twilio in Meta's response format. Every other call (ads, lead forms) goes
+  // to Meta unchanged.
+  async graphFetch(url: string, init?: { method?: string; headers?: any; body?: any }): Promise<Response> {
+    let u: URL;
+    try { u = new URL(url); } catch { return fetch(url, init as any); }
+    if (u.hostname !== 'graph.facebook.com' || !this.isConfigured()) return fetch(url, init as any);
+    const [first = '', second = ''] = u.pathname.split('/').filter(Boolean).slice(1);
+    const method = String(init?.method || 'GET').toUpperCase();
+    const ours = first === TWILIO_PSEUDO_ID || first.startsWith('twupload_') || /^HX[0-9a-f]{32}$/i.test(first)
+      || (first === 'debug_token' && u.searchParams.get('input_token') === TWILIO_PSEUDO_ID);
+    if (!ours) return fetch(url, init as any);
+    try {
+      if (first === 'debug_token') {
+        return jsonResponse(200, { data: { app_id: TWILIO_PSEUDO_ID, is_valid: true, type: 'SYSTEM_USER', scopes: ['whatsapp_business_messaging', 'whatsapp_business_management'] } });
+      }
+      if (second === 'messages' && method === 'POST') return jsonResponse(200, await this.send(JSON.parse(String(init?.body || '{}'))));
+      if (second === 'uploads' && method === 'POST') {
+        const id = `twupload_${randomUUID().replace(/-/g, '')}`;
+        this.uploadSessions.set(id, u.searchParams.get('file_type') || 'application/octet-stream');
+        return jsonResponse(200, { id });
+      }
+      if (first.startsWith('twupload_') && method === 'POST') {
+        const contentType = this.uploadSessions.get(first) || headerValue(init?.headers, 'content-type') || 'application/octet-stream';
+        this.uploadSessions.delete(first);
+        const bytes = Buffer.isBuffer(init?.body) ? init!.body : Buffer.from(init?.body ?? '');
+        const ext = extensionFor(contentType);
+        const { objectKey } = await this.r2.uploadBuffer(bytes, 'whatsapp-template-samples', `sample.${ext}`, contentType);
+        return jsonResponse(200, { h: `twsample:${objectKey}` });
+      }
+      if (second === 'message_templates') {
+        if (method === 'POST') return jsonResponse(200, await this.createTemplate(JSON.parse(String(init?.body || '{}'))));
+        if (method === 'DELETE') return jsonResponse(200, await this.deleteTemplate(u.searchParams.get('name') || ''));
+        return jsonResponse(200, { data: await this.templatesByName(u.searchParams.get('name') || '') });
+      }
+      if (/^HX[0-9a-f]{32}$/i.test(first) && !second && method === 'GET') return jsonResponse(200, await this.templateStatus(first));
+      return jsonResponse(400, { error: { message: 'Not available for a Twilio WhatsApp sender' } });
+    } catch (e: any) {
+      const message = String(e?.message || e);
+      return jsonResponse(400, { error: { message, error_user_msg: message, error_data: { details: message } } });
+    }
   }
 
   // ---------------------------------------------------------------- incoming
@@ -331,6 +591,86 @@ export class TwilioWhatsAppService {
     return rows.sort((a, b) => new Date(a.dateSent).getTime() - new Date(b.dateSent).getTime());
   }
 
+  // ---------------------------------------------------------------- bulk sending
+
+  // One approved Content to one number (bulk WhatsApp). Returns the Twilio message SID.
+  async sendContent(toDigits: string, contentSid: string, vars: Record<string, string>): Promise<string> {
+    const result = await this.postMessage(toDigits, { contentSid, vars });
+    return result.messages[0].id;
+  }
+
+  // Every WhatsApp-approved template in the Twilio account (the CRM's and any made in the Twilio
+  // console), with its text and variable numbers, for choosing one to send in bulk.
+  async approvedTemplates(): Promise<ApprovedTemplate[]> {
+    const out: ApprovedTemplate[] = [];
+    let url = 'https://content.twilio.com/v1/ContentAndApprovals?PageSize=500';
+    for (let page = 0; url && page < 10; page++) {
+      const res = await fetch(url, { headers: { Authorization: this.authHeader() } });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(`Could not list Twilio templates: ${data?.message || res.status}`);
+      for (const c of data?.contents ?? []) {
+        if (String(c?.approval_requests?.status || '').toLowerCase() !== 'approved') continue;
+        const types = c.types || {};
+        const kind = Object.keys(types)[0] || '';
+        const t = types[kind] || {};
+        const body = String(t.body ?? t.title ?? '');
+        const numbers = [...new Set([...JSON.stringify(types).matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+        out.push({
+          sid: c.sid, name: c.approval_requests?.name || c.friendly_name, category: String(c.approval_requests?.category || '').toUpperCase(),
+          language: c.language, kind, body, footer: t.subtitle ? String(t.subtitle) : null,
+          hasMedia: !!(t.media?.length), buttons: (t.actions ?? []).map((a: any) => String(a.title || '')).filter(Boolean),
+          variables: numbers.map((n) => ({ number: n, sample: String(c.variables?.[String(n)] ?? ''), inBody: body.includes(`{{${n}}}`) })),
+        });
+      }
+      url = data?.meta?.next_page_url || '';
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // ---------------------------------------------------------------- billing
+
+  // This month's WhatsApp cost from Twilio's usage records: Twilio's own per-message fee plus
+  // Meta's charge per template message, in the account currency, with the prepaid balance.
+  async billing() {
+    const now = new Date();
+    const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    const today = now.toISOString().slice(0, 10);
+    const base = `https://api.twilio.com/2010-04-01/Accounts/${this.sid}`;
+    const get = async (path: string) => {
+      const res = await fetch(`${base}${path}`, { headers: { Authorization: this.authHeader() } });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || `Twilio ${res.status}`);
+      return data;
+    };
+    const [month, daily, balance] = await Promise.all([
+      get('/Usage/Records/ThisMonth.json?PageSize=1000'),
+      get(`/Usage/Records/Daily.json?Category=channels&StartDate=${monthStart}&EndDate=${today}&PageSize=100`),
+      get('/Balance.json'),
+    ]);
+    const LABELS: Record<string, string> = {
+      'channels-messaging-outbound': 'Twilio fee - messages sent',
+      'channels-messaging-inbound': 'Twilio fee - messages received',
+      'channels-whatsapp-template-marketing': 'WhatsApp marketing templates',
+      'channels-whatsapp-template-utility': 'WhatsApp utility templates',
+      'channels-whatsapp-template-authentication': 'WhatsApp authentication templates',
+      'channels-whatsapp-template-service': 'Replies within 24 hours (free)',
+    };
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const records: any[] = month?.usage_records ?? [];
+    const byCategory = Object.keys(LABELS).map((key) => {
+      const r = records.find((x) => x.category === key);
+      return { category: LABELS[key], volume: Number(r?.usage || 0), cost: round(Number(r?.price || 0)) };
+    });
+    const totalCost = round(byCategory.reduce((sum, c) => sum + c.cost, 0));
+    const days = (daily?.usage_records ?? []).map((r: any) => ({ date: String(r.start_date), volume: Number(r.usage || 0), cost: round(Number(r.price || 0)) }))
+      .sort((a: any, b: any) => b.date.localeCompare(a.date));
+    return {
+      provider: 'twilio', currency: String(balance?.currency || records[0]?.price_unit || 'USD').toUpperCase(), monthStart: `${monthStart}T00:00:00.000Z`,
+      totalCost, gstRate: 0, estimatedGst: 0, estimatedTotal: totalCost, todayCost: days.find((d: any) => d.date === today)?.cost ?? 0,
+      balance: round(Number(balance?.balance || 0)), byCategory, days, updatedAt: new Date().toISOString(),
+    };
+  }
+
   // ---------------------------------------------------------------- health
 
   async health(): Promise<TwilioHealth> {
@@ -357,6 +697,45 @@ export class TwilioWhatsAppService {
     this.healthCache = { at: Date.now(), value: out };
     return out;
   }
+}
+
+function jsonResponse(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function headerValue(headers: any, name: string): string | undefined {
+  if (!headers) return undefined;
+  if (typeof headers.get === 'function') return headers.get(name) ?? undefined;
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === name);
+  return key ? String(headers[key]) : undefined;
+}
+
+const EXTENSIONS: Record<string, string> = {
+  'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4',
+  'application/msword': 'doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+};
+function extensionFor(contentType: string) {
+  return EXTENSIONS[String(contentType).split(';')[0].trim().toLowerCase()] || 'bin';
+}
+
+// A name for a file the CRM did not name: the extension of its link or key, else by kind.
+function defaultFileName(kind: string, linkOrKey: string) {
+  const ext = /\.([a-z0-9]{2,5})(?:[?#]|$)/i.exec(String(linkOrKey).split('?')[0])?.[1]?.toLowerCase();
+  const base = kind === 'image' ? 'image' : kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'document';
+  return `${base}.${ext || (kind === 'image' ? 'jpg' : kind === 'video' ? 'mp4' : kind === 'audio' ? 'ogg' : 'pdf')}`;
+}
+
+// File name as the customer will see it: letters, digits and simple punctuation, extension kept.
+function safeFileName(name: string) {
+  const cleaned = String(name || 'document').normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._()-]+/g, '-').replace(/-+/g, '-').replace(/^[-.]+|-+$/g, '');
+  const dot = cleaned.lastIndexOf('.');
+  const [base, ext] = dot > 0 ? [cleaned.slice(0, dot), cleaned.slice(dot)] : [cleaned, ''];
+  return (base.slice(0, 80) || 'document') + ext.slice(0, 6);
+}
+
+export interface ApprovedTemplate {
+  sid: string; name: string; category: string; language: string; kind: string; body: string; footer: string | null;
+  hasMedia: boolean; buttons: string[]; variables: { number: number; sample: string; inBody: boolean }[];
 }
 
 export interface TwilioHealth {

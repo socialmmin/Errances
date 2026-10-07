@@ -155,7 +155,11 @@ export function LeadAlertProvider() {
       const pushText = pushNeeded ? 'Enable notifications or you may miss new leads and critical ad alerts.' : '';
       // Mirrors exactly what /settings/integrations shows per-check, so this banner and that page
       // never disagree about what's actually wrong.
-      const connectionText = connectionProblem
+      const connectionText = !connectionProblem ? ''
+        : whatsappHealth?.provider === 'twilio'
+        ? (!whatsappHealth.tokenValid ? 'The Twilio account login is invalid or expired -- WhatsApp messages cannot be sent or received.'
+          : 'The Twilio WhatsApp sender is offline or is not delivering messages to this CRM -- check the sender in the Twilio console.')
+        : connectionProblem
         ? (whatsappHealth?.inboundStale ? "WhatsApp isn't receiving replies -- messages send out fine but nothing is coming back. Check the Meta webhook subscription."
           : !whatsappHealth?.tokenValid ? 'WhatsApp access token is invalid or expired.'
           : !whatsappHealth?.secretValid ? "WhatsApp app secret couldn't be verified -- inbound webhooks may be getting rejected."

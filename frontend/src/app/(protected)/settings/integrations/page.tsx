@@ -77,7 +77,7 @@ function WhatsAppSection() {
           )}
           <StatusRow label="Access token" state={health.tokenValid ? 'ok' : 'bad'} detail={health.tokenValid ? `Valid — app: ${health.appName || health.appId || 'unknown'}` : "Invalid or expired — sends and status checks will fail"} />
           <StatusRow label="App secret (webhook signature)" state={health.secretValid ? 'ok' : 'bad'} detail={health.secretValid ? `Verified via ${health.secretSource === 'crm' ? 'the key saved in this CRM' : 'the server environment'}` : 'Could not verify — inbound webhooks may be getting rejected'} />
-          <StatusRow label="App subscribed to this WhatsApp number" state={health.subscribed ? 'ok' : 'bad'} detail={health.subscribed ? 'Confirmed with Meta' : 'Not subscribed — Meta will not deliver any webhook events at all'} />
+          <StatusRow label="App subscribed to this WhatsApp number" state={health.subscribed ? 'ok' : 'bad'} detail={health.provider === 'twilio' ? (health.subscribed ? 'Twilio sender is online and delivers incoming messages to this CRM' : 'The Twilio sender is offline or its webhook address does not point to this CRM') : health.subscribed ? 'Confirmed with Meta' : 'Not subscribed — Meta will not deliver any webhook events at all'} />
           <StatusRow label="Inbound messages (replies, button taps)" state={health.inboundStale ? 'bad' : health.lastInboundAt ? 'ok' : 'unknown'} detail={`${health.inboundCount} received total · last one ${timeAgo(health.lastInboundAt)}`} />
           <StatusRow label="Outbound sends (last 24h)" state={health.recentOutboundCount > 0 ? 'ok' : 'unknown'} detail={`${health.recentOutboundCount} sent`} />
           <StatusRow label="Webhook signature rejections" state={health.lastRejectedAt && Date.now() - new Date(health.lastRejectedAt).getTime() < 3600000 ? 'warn' : 'ok'} detail={health.lastRejectedAt ? `Last rejected ${timeAgo(health.lastRejectedAt)} — check the App Secret` : 'None recently'} />
@@ -87,7 +87,7 @@ function WhatsAppSection() {
       {!health?.configured && !isLoading && (
         <p className="mt-3 text-sm text-slate-500">WhatsApp isn't configured yet. <Link href="/settings/whatsapp" className="font-semibold text-gold underline">Set it up</Link>.</p>
       )}
-      <p className="mt-4 text-xs text-slate-400">Checked against the real Meta Graph API and this CRM's own message log every time this loads, and every 30 seconds automatically — never just "a key is saved."</p>
+      <p className="mt-4 text-xs text-slate-400">Checked against the real {health?.provider === 'twilio' ? 'Twilio' : 'Meta Graph'} API and this CRM's own message log every time this loads, and every 30 seconds automatically — never just "a key is saved."</p>
     </section>
   );
 }

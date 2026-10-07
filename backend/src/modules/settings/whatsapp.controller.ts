@@ -8,6 +8,7 @@ import { PERMISSIONS } from '../../common/rbac/role-permissions';
 import { CreateWhatsAppTemplateDto } from './dto/create-whatsapp-template.dto';
 import { UpdateWhatsAppTemplateDto } from './dto/update-whatsapp-template.dto';
 import { SaveWhatsAppConfigDto } from './dto/save-whatsapp-config.dto';
+import { TwilioWhatsAppService } from '../integrations/whatsapp/twilio-whatsapp.service';
 
 // Templates + message logs + a write-only API config placeholder for the
 // Settings > WhatsApp module, ported from hala-audit's whatsapp.tsx.
@@ -16,7 +17,7 @@ import { SaveWhatsAppConfigDto } from './dto/save-whatsapp-config.dto';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('whatsapp')
 export class WhatsAppController {
-  constructor(@Inject(PG_POOL) private pool: Pool) {}
+  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService) {}
 
   @Get('templates')
   @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
@@ -162,9 +163,12 @@ export class WhatsAppController {
     return rows[0];
   }
 
+  // Any signed-in user: the Inbox enables its Send button from this, and it holds nothing secret.
   @Get('config')
-  @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
   async getConfig() {
+    if (this.twilio.isConfigured()) {
+      return { provider: 'twilio', sender: this.twilio.from.replace('whatsapp:', ''), phone_number_id: null, business_account_id: null, is_configured: true, configured_at: null };
+    }
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, is_configured, configured_at FROM whatsapp_config ORDER BY created_at DESC LIMIT 1`,
     );

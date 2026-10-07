@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
+import { TwilioWhatsAppService, TWILIO_PSEUDO_ID } from '../integrations/whatsapp/twilio-whatsapp.service';
+import { waNumber } from '../integrations/whatsapp/whatsapp-bot.service';
 import { PG_POOL } from '../../common/db/pool.module';
 import { QuotationsRepository, quotationVisibleSql } from './quotations.repository';
 import { seesAllLeads } from '../../common/leads/lead-visibility';
@@ -18,6 +20,7 @@ export class QuotationsService implements OnModuleInit {
     @Inject(PG_POOL) private pool: Pool,
     private config: ConfigService,
     private push: PushService,
+    private twilio: TwilioWhatsAppService,
   ) {}
 
   findAll(params: { branchId?: string; visibleTo?: string; status?: string; search?: string; from?: string; to?: string; category?: string; destination?: string; page?: number; pageSize?: number }) {
@@ -119,7 +122,7 @@ export class QuotationsService implements OnModuleInit {
     const text = customText?.trim();
     const templateReady = templateSettings.templateStatus === 'APPROVED' && !!templateSettings.templateName;
     const usePlain = !!text && (edited || !templateReady);
-    const to = digits.length === 10 ? `91${digits}` : digits;
+    const to = waNumber(digits) || digits;
     let sentBody = '';
     let sent: any;
     if (usePlain) {
@@ -168,6 +171,7 @@ export class QuotationsService implements OnModuleInit {
   }
 
   private async getWhatsAppConfig(): Promise<{ phone_number_id: string; business_account_id: string; access_token: string } | null> {
+    if (this.twilio.isConfigured()) return { phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token: TWILIO_PSEUDO_ID };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`,
     );
@@ -214,7 +218,7 @@ export class QuotationsService implements OnModuleInit {
     const baseUrl = (this.config.get<string>('ALLOWED_ORIGIN') || 'https://errances.socialmm.in').split(',')[0];
     const templateName = 'quotation_ready_v1';
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -253,7 +257,7 @@ export class QuotationsService implements OnModuleInit {
     if (!existing.templateId) throw new BadRequestException('No template submitted yet');
 
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${existing.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${existing.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await res.json();
     if (!res.ok) throw new BadRequestException(data?.error?.message || 'Could not check template status');
     const status = String(data.status || existing.templateStatus).toUpperCase();
@@ -266,7 +270,7 @@ export class QuotationsService implements OnModuleInit {
 
   private async callWhatsAppApi(config: { phone_number_id: string; access_token: string }, payload: Record<string, unknown>) {
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${config.phone_number_id}/messages`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.phone_number_id}/messages`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),

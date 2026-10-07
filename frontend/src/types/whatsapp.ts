@@ -29,6 +29,9 @@ export interface WhatsAppConfig {
   business_account_id: string | null;
   is_configured: boolean;
   configured_at: string | null;
+  // Set when WhatsApp runs through Twilio (configured on the server, not on this screen).
+  provider?: 'twilio';
+  sender?: string;
 }
 
 export const WHATSAPP_MERGE_VARIABLES = [

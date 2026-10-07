@@ -16,7 +16,7 @@ import { CreateLeadDto } from '../../leads/dto/create-lead.dto';
 import { RealtimeGateway } from '../../../common/realtime/realtime.gateway';
 import { PackagesService } from '../../packages/packages.service';
 import { PushService } from '../../../common/push/push.service';
-import { TwilioWhatsAppService } from './twilio-whatsapp.service';
+import { TwilioWhatsAppService, TWILIO_PSEUDO_ID } from './twilio-whatsapp.service';
 
 interface WhatsAppReferral {
   source_url?: string;
@@ -128,9 +128,9 @@ export function buildMetaButtons(pkg: any): { meta: any[]; quickReplyIndexes: nu
     const text = String(b.text || '').trim().slice(0, 25);
     if (!text) throw new BadRequestException('Every button needs some text');
     if (b.type === 'call') {
-      const mobile = normalizeIndianMobile(b.phone || pkg?.contact_number);
-      if (!mobile) throw new BadRequestException('The Call button needs a valid 10-digit Indian mobile number, for example 9443146955');
-      meta.push({ type: 'PHONE_NUMBER', text, phone_number: '+91' + mobile });
+      const number = waNumber(b.phone || pkg?.contact_number);
+      if (!number) throw new BadRequestException('The Call button needs a valid phone number, for example 06 12 34 56 78 or +33 6 12 34 56 78');
+      meta.push({ type: 'PHONE_NUMBER', text, phone_number: '+' + number });
     } else if (b.type === 'url') {
       const url = String(b.url || '').trim();
       if (!/^https?:\/\/\S+\.\S+/.test(url)) throw new BadRequestException('Website buttons need a full link starting with https://');
@@ -142,7 +142,7 @@ export function buildMetaButtons(pkg: any): { meta: any[]; quickReplyIndexes: nu
       durationButtonIndex = index;
     } else {
       const callFallback = all.find((c) => c.type === 'call')?.phone;
-      if (!normalizeIndianMobile(b.phone || callFallback || pkg?.contact_number)) throw new BadRequestException('The Chat button needs a valid 10-digit WhatsApp number, for example 9443146955');
+      if (!waNumber(b.phone || callFallback || pkg?.contact_number)) throw new BadRequestException('The Chat button needs a valid WhatsApp number, for example 06 12 34 56 78 or +33 6 12 34 56 78');
       // dynamic link: the per-send suffix is <itineraryId>.<buttonPosition>
       meta.push({ type: 'URL', text, url: `${PUBLIC_API_BASE}/api/integrations/whatsapp/chat/{{1}}`, example: [`${PUBLIC_API_BASE}/api/integrations/whatsapp/chat/00000000-0000-0000-0000-000000000000.1`] });
       quickReplyIndexes.push(index);
@@ -197,6 +197,25 @@ export function normalizeIndianMobile(value: string): string | null {
   if (digits.length === 11 && digits.startsWith('1') && /^[6-9]/.test(digits.slice(1))) digits = digits.slice(1);
   return /^[6-9]\d{9}$/.test(digits) ? digits : null;
 }
+
+// A phone number as WhatsApp wants it: country code + number, digits only. Indian mobiles are
+// recognised as before; a 10-digit number starting with 0 is French (06 12 34 56 78 -> 33612345678);
+// anything else must already carry its country code (+44..., 0044...).
+export function waNumber(value: string | null | undefined): string | null {
+  const indian = normalizeIndianMobile(String(value || ''));
+  if (indian) return `91${indian}`;
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.length === 10 && digits.startsWith('0')) digits = `33${digits.slice(1)}`;
+  return /^[1-9]\d{7,14}$/.test(digits) ? digits : null;
+}
+
+// A waNumber() for people to read: +91 98437 80129, +33 6 12 34 56 78, else +<digits>.
+export function displayPhone(full: string): string {
+  if (/^91\d{10}$/.test(full)) return `+91 ${full.slice(2, 7)} ${full.slice(7)}`;
+  if (/^33\d{9}$/.test(full)) return `+33 ${full.slice(2, 3)} ${full.slice(3).replace(/(\d{2})(?=\d)/g, '$1 ')}`;
+  return `+${full}`;
+}
 const CALLBACK_PAYLOAD = 'CALLBACK_REQUEST';
 
 const GREETING =
@@ -233,6 +252,17 @@ export class WhatsAppBotService implements OnModuleInit {
   // (sendItineraryForLead's own dedup guard makes this safe to run repeatedly),
   // and alert with a tally either way so a missed lead is never just silence.
   onModuleInit() {
+    // Twilio reports a template's WhatsApp approval decision by being asked (it has no webhook for
+    // it); each decision goes through the same handler as Meta's template-status webhook, and also
+    // updates the shared itinerary template that handler does not cover.
+    this.twilio.onTemplateStatus(async (e) => {
+      await this.pool.query(
+        `UPDATE whatsapp_automation_settings SET itinerary_template_status=$2, itinerary_template_rejection_reason=$3, itinerary_template_checked_at=now(), updated_at=now() WHERE itinerary_template_id=$1`,
+        [e.contentSid, e.status, e.reason],
+      ).catch(() => undefined);
+      await this.processWebhookPayload({ entry: [{ changes: [{ field: 'message_template_status_update', value: { message_template_id: e.contentSid, message_template_name: e.name, event: e.status, reason: e.reason } }] }] });
+    });
+
     // The old "sweep never-attempted leads" job stays OFF (it sent 161 messages
     // unattended). Only this narrow, slow, approved retry queue runs: it retries
     // Meta-throttled failures a few at a time, well spaced, in daytime only.
@@ -541,7 +571,7 @@ export class WhatsAppBotService implements OnModuleInit {
   private async metaSecretWorks(appId: string, secret: string): Promise<'valid' | 'invalid' | 'unknown'> {
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
     try {
-      const res = await fetch(`https://graph.facebook.com/${version}/app?access_token=${encodeURIComponent(appId + '|' + secret)}`);
+      const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/app?access_token=${encodeURIComponent(appId + '|' + secret)}`);
       const data: any = await res.json();
       if (res.ok && data?.id) return 'valid';
       if (data?.error?.is_transient || data?.error?.code === 4 || data?.error?.code === 17 || data?.error?.code === 32) return 'unknown';
@@ -575,7 +605,7 @@ export class WhatsAppBotService implements OnModuleInit {
     }
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
     if (!twilio) try {
-      const res = await fetch(`https://graph.facebook.com/${version}/debug_token?input_token=${encodeURIComponent(config.access_token)}&access_token=${encodeURIComponent(config.access_token)}`);
+      const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/debug_token?input_token=${encodeURIComponent(config.access_token)}&access_token=${encodeURIComponent(config.access_token)}`);
       const data: any = await res.json();
       out.tokenValid = !!data?.data?.is_valid;
       out.appId = data?.data?.app_id ?? null;
@@ -609,7 +639,7 @@ export class WhatsAppBotService implements OnModuleInit {
         }
       }
       try {
-        const res = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/subscribed_apps?access_token=${encodeURIComponent(config.access_token)}`);
+        const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/subscribed_apps?access_token=${encodeURIComponent(config.access_token)}`);
         const data: any = await res.json();
         out.subscribed = (data?.data || []).some((x: any) => String(x?.whatsapp_business_api_data?.id) === String(out.appId));
       } catch { /* leave default */ }
@@ -636,12 +666,12 @@ export class WhatsAppBotService implements OnModuleInit {
     out.throughputTier = null;
     if (twilio) {
       const h = await this.twilio.health();
-      out.qualityRating = h.quality;
+      out.qualityRating = ({ HIGH: 'GREEN', MEDIUM: 'YELLOW', LOW: 'RED' } as Record<string, string>)[String(h.quality || '').toUpperCase()] ?? null;
       out.throughputTier = h.throughput;
       return out;
     }
     try {
-      const res = await fetch(`https://graph.facebook.com/${version}/${config.phone_number_id}?fields=quality_rating,throughput&access_token=${encodeURIComponent(config.access_token)}`);
+      const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.phone_number_id}?fields=quality_rating,throughput&access_token=${encodeURIComponent(config.access_token)}`);
       const data: any = await res.json();
       out.qualityRating = data?.quality_rating ?? null;
       out.throughputTier = data?.throughput?.level ?? null;
@@ -690,7 +720,15 @@ export class WhatsAppBotService implements OnModuleInit {
 
   async processTwilioStatus(params: Record<string, string>): Promise<void> {
     const payload = this.twilio.toCloudStatus(params);
-    if (payload) await this.processWebhookPayload(payload);
+    if (!payload) return;
+    // A bulk WhatsApp recipient's delivery state (never moved backwards by a late event).
+    const status = payload.entry[0].changes[0].value.statuses[0];
+    await this.pool.query(
+      `UPDATE whatsapp_broadcast_recipients SET status = $2, error = $3, updated_at = now()
+        WHERE message_sid = $1 AND (CASE status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 WHEN 'failed' THEN 4 ELSE 0 END) <= $4`,
+      [status.id, status.status, status.errors?.[0]?.title ?? null, ({ sent: 1, delivered: 2, read: 3, failed: 4 } as Record<string, number>)[status.status] ?? 0],
+    ).catch(() => undefined);
+    await this.processWebhookPayload(payload);
   }
 
   // Customer messages Twilio received while the CRM could not take them (e.g. its webhook address
@@ -745,7 +783,7 @@ export class WhatsAppBotService implements OnModuleInit {
             // not just a socket event only an open tab would see.
             if (['REJECTED', 'PAUSED', 'DISABLED'].includes(status)) {
               this.push.notifyAll({
-                title: `Meta rejected a template — ${v.message_template_name || 'itinerary'}`,
+                title: `WhatsApp rejected a template — ${v.message_template_name || 'itinerary'}`,
                 body: reason ? reason.slice(0, 150) : 'Open the itinerary to see why and resubmit.',
                 url: '/packages',
               }).catch((err: any) => this.logger.error(`Push notify failed for template rejection: ${err.message}`));
@@ -838,7 +876,7 @@ export class WhatsAppBotService implements OnModuleInit {
       throw new BadRequestException('Meta template must be approved before testing');
     }
     const link = await this.r2.getPresignedDownloadUrl(pkg.itinerary_pdf_object_key, 600);
-    const result = await this.sendDocumentTemplate(config, normalized, pkg.whatsapp_template_name, link, pkg.itinerary_pdf_file_name || `${pkg.name}.pdf`, pkg.description || `Please review the ${pkg.name} itinerary.`, pkg.contact_name || 'Errances Voyages', pkg.contact_number || '9344465904', pkg);
+    const result = await this.sendDocumentTemplate(config, normalized, pkg.whatsapp_template_name, link, pkg.itinerary_pdf_file_name || `${pkg.name}.pdf`, pkg.description || `Please review the ${pkg.name} itinerary.`, pkg.contact_name || 'Errances Voyages', pkg.contact_number || '', pkg);
     // Test sends used to record leadId=null, which left "Explore More Itineraries" unable to work
     // at all when YOU reply on the test number: it looks up what package was last sent via
     // whatsapp_logs.lead_id, and a null lead_id there is simply never found. A real lead record
@@ -887,7 +925,7 @@ export class WhatsAppBotService implements OnModuleInit {
     if (!pkg.itinerary_pdf_object_key) throw new BadRequestException('Upload the itinerary document first');
     pkg.contact_button_text = pkg.contact_button_text ?? null;
     if (pkg.buttons || String(pkg.contact_number || '').trim()) {
-      return this.submitButtonTemplate(config, pkg, normalizeIndianMobile(pkg.contact_number));
+      return this.submitButtonTemplate(config, pkg, waNumber(pkg.contact_number));
     }
     const { rows: sharedRows } = await this.pool.query(
       `SELECT itinerary_template_id,itinerary_template_name,itinerary_template_status,itinerary_template_rejection_reason
@@ -913,20 +951,20 @@ export class WhatsAppBotService implements OnModuleInit {
     const { headerFormat, mimeType: fileType } = metaHeaderMedia(pkg.itinerary_pdf_file_name, fileResponse.headers.get('content-type'));
     const appId = await this.resolveMetaAppId(config.access_token);
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const sessionResponse = await fetch(`https://graph.facebook.com/${version}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(fileType)}&access_token=${encodeURIComponent(config.access_token)}`, { method:'POST' });
+    const sessionResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(fileType)}&access_token=${encodeURIComponent(config.access_token)}`, { method:'POST' });
     const session: any = await sessionResponse.json();
     if (!sessionResponse.ok || !session.id) throw new BadRequestException(`Meta upload session failed: ${session?.error?.message || sessionResponse.status}`);
-    const uploadResponse = await fetch(`https://graph.facebook.com/${version}/${session.id}`, {
+    const uploadResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${session.id}`, {
       method:'POST', headers:{ Authorization:`OAuth ${config.access_token}`, file_offset:'0', 'Content-Type':fileType }, body:bytes,
     });
     const upload: any = await uploadResponse.json();
     if (!uploadResponse.ok || !upload.h) throw new BadRequestException(`Meta document upload failed: ${upload?.error?.message || uploadResponse.status}`);
     const bodyText = `{{1}}\n\nYour travel consultant: {{2}}\nCall or WhatsApp: {{3}}`;
-    const createResponse = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+    const createResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
       method:'POST', headers:{ Authorization:`Bearer ${config.access_token}`, 'Content-Type':'application/json' },
       body:JSON.stringify({ name:templateName, language:'en_US', category:'MARKETING', components:[
         { type:'HEADER', format:headerFormat, example:{ header_handle:[upload.h] } },
-        { type:'BODY', text:bodyText, example:{ body_text:[[`Thank you for your interest. Please review the attached itinerary.`,'Errances Voyages','9344465904']] } },
+        { type:'BODY', text:bodyText, example:{ body_text:[[`Thank you for your interest. Please review the attached itinerary.`,'Errances Voyages','+33 1 23 45 67 89']] } },
       ]}),
     });
     const created: any = await createResponse.json();
@@ -965,7 +1003,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const { rows: pkgRows } = await this.pool.query(`SELECT buttons, contact_number, description, name FROM tour_packages WHERE id=$1 AND is_deleted=false`, [doc.package_id]);
     const pkg = pkgRows[0];
     const { meta: metaButtons } = buildMetaButtons(pkg ?? {});
-    const national = normalizeIndianMobile(pkg?.contact_number) || '';
+    const national = waNumber(pkg?.contact_number) ? displayPhone(waNumber(pkg?.contact_number)!) : '';
     // Same message as the primary itinerary's own template -- only the download line's day/night
     // count differs, since that's the one part of the text that's actually specific to this document.
     // Two separate slots (hook, offer) instead of one joined string, so they land on their own
@@ -987,7 +1025,7 @@ export class WhatsAppBotService implements OnModuleInit {
     // existing template up on Meta by name and adopts it instead of blindly re-creating -- this
     // did the same check locally (see the on-current-format branch above) but never checked
     // Meta itself, so a local-only reset (nothing wrong on Meta's side) always hit this wall.
-    const lookup: any = await fetch(`https://graph.facebook.com/${version0}/${config.business_account_id}/message_templates?name=${encodeURIComponent(templateName)}&fields=id,name,status&access_token=${encodeURIComponent(config.access_token)}`).then((r) => r.json()).catch(() => null);
+    const lookup: any = await this.twilio.graphFetch(`https://graph.facebook.com/${version0}/${config.business_account_id}/message_templates?name=${encodeURIComponent(templateName)}&fields=id,name,status&access_token=${encodeURIComponent(config.access_token)}`).then((r) => r.json()).catch(() => null);
     const already = lookup?.data?.find((t: any) => t.name === templateName);
     if (already) {
       const { rows: adopted } = await this.pool.query(
@@ -1004,20 +1042,20 @@ export class WhatsAppBotService implements OnModuleInit {
     const { headerFormat, mimeType: fileType } = metaHeaderMedia(doc.file_name, fileResponse.headers.get('content-type'));
     const appId = await this.resolveMetaAppId(config.access_token);
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const sessionResponse = await fetch(`https://graph.facebook.com/${version}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(fileType)}&access_token=${encodeURIComponent(config.access_token)}`, { method: 'POST' });
+    const sessionResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(fileType)}&access_token=${encodeURIComponent(config.access_token)}`, { method: 'POST' });
     const session: any = await sessionResponse.json();
     if (!sessionResponse.ok || !session.id) throw new BadRequestException(`Meta upload session failed: ${session?.error?.message || sessionResponse.status}`);
-    const uploadResponse = await fetch(`https://graph.facebook.com/${version}/${session.id}`, {
+    const uploadResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${session.id}`, {
       method: 'POST', headers: { Authorization: `OAuth ${config.access_token}`, file_offset: '0', 'Content-Type': fileType }, body: bytes,
     });
     const upload: any = await uploadResponse.json();
     if (!uploadResponse.ok || !upload.h) throw new BadRequestException(`Meta document upload failed: ${upload?.error?.message || uploadResponse.status}`);
     const durationLabel = doc.duration_days ? `${doc.duration_days} Day${doc.duration_days === 1 ? '' : 's'} / ${doc.duration_nights ?? 0} Night${doc.duration_nights === 1 ? '' : 's'} ` : '';
-    const createResponse = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+    const createResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
       method: 'POST', headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: templateName, language: 'en_US', category: 'MARKETING', components: [
         { type: 'HEADER', format: headerFormat, example: { header_handle: [upload.h] } },
-        { type: 'BODY', text: `Dear {{1}},\n\n📥 Download your ${durationLabel}itinerary above👆.\n\n{{2}}\n\n{{3}}\n\nYour expert: *{{4}}* — tap a button below to get in touch.`, example: { body_text: [['Mr. Ramesh', samePkgP2.slice(0, 450) || 'Dreaming of a holiday but worried about planning and cost?', samePkgP3.slice(0, 450) || 'We have a ready itinerary with handpicked stays and sightseeing, all within your budget.', `Errances Voyages · ${national || '9443146955'}`]] } },
+        { type: 'BODY', text: `Dear {{1}},\n\n📥 Download your ${durationLabel}itinerary above👆.\n\n{{2}}\n\n{{3}}\n\nYour expert: *{{4}}* — tap a button below to get in touch.`, example: { body_text: [['Mr. Ramesh', samePkgP2.slice(0, 450) || 'Dreaming of a holiday but worried about planning and cost?', samePkgP3.slice(0, 450) || 'We have a ready itinerary with handpicked stays and sightseeing, all within your budget.', `Errances Voyages · ${national || '+33 1 23 45 67 89'}`]] } },
         ...(metaButtons.length ? [{ type: 'BUTTONS', buttons: metaButtons }] : []),
       ] }),
     });
@@ -1039,7 +1077,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const templateId = rows[0]?.whatsapp_template_id;
     if (!templateId) throw new BadRequestException('No template submitted yet for this document');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const response = await fetch(`https://graph.facebook.com/${version}/${templateId}?fields=id,name,status,category,language,quality_score,rejected_reason,last_updated_time&access_token=${encodeURIComponent(config.access_token)}`);
+    const response = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${templateId}?fields=id,name,status,category,language,quality_score,rejected_reason,last_updated_time&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await response.json();
     if (!response.ok) throw new BadRequestException(`Could not read Meta template status: ${data?.error?.message || response.status}`);
     const status = String(data.status || 'PENDING').toUpperCase();
@@ -1071,7 +1109,7 @@ export class WhatsAppBotService implements OnModuleInit {
   // Packages using the same number share the same template, so a number only
   // needs Meta's approval once.
   private async submitButtonTemplate(config: WhatsAppConfig, pkg: any, contactMobile: string | null) {
-    const national = contactMobile || '';
+    const national = contactMobile ? displayPhone(contactMobile) : '';
     const { meta: metaButtons, signature } = buildMetaButtons(pkg);
     const templateName = `${V2_TEMPLATE_PREFIX}${signature}`;
 
@@ -1086,7 +1124,7 @@ export class WhatsAppBotService implements OnModuleInit {
 
     if (!templateId) {
       const lookupVersion = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-      const lookup: any = await (await fetch(`https://graph.facebook.com/${lookupVersion}/${config.business_account_id}/message_templates?name=${encodeURIComponent(templateName)}&fields=id,name,status&access_token=${encodeURIComponent(config.access_token)}`)).json().catch(() => null);
+      const lookup: any = await (await this.twilio.graphFetch(`https://graph.facebook.com/${lookupVersion}/${config.business_account_id}/message_templates?name=${encodeURIComponent(templateName)}&fields=id,name,status&access_token=${encodeURIComponent(config.access_token)}`)).json().catch(() => null);
       const already = lookup?.data?.find((t: any) => t.name === templateName);
       if (already) { templateId = already.id; status = String(already.status || 'PENDING').toUpperCase(); }
     }
@@ -1099,19 +1137,19 @@ export class WhatsAppBotService implements OnModuleInit {
       const { headerFormat, mimeType: fileType } = metaHeaderMedia(pkg.itinerary_pdf_file_name, fileResponse.headers.get('content-type'));
       const appId = await this.resolveMetaAppId(config.access_token);
       const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-      const sessionResponse = await fetch(`https://graph.facebook.com/${version}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(fileType)}&access_token=${encodeURIComponent(config.access_token)}`, { method:'POST' });
+      const sessionResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(fileType)}&access_token=${encodeURIComponent(config.access_token)}`, { method:'POST' });
       const session: any = await sessionResponse.json();
       if (!sessionResponse.ok || !session.id) throw new BadRequestException(`Meta upload session failed: ${session?.error?.message || sessionResponse.status}`);
-      const uploadResponse = await fetch(`https://graph.facebook.com/${version}/${session.id}`, {
+      const uploadResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${session.id}`, {
         method:'POST', headers:{ Authorization:`OAuth ${config.access_token}`, file_offset:'0', 'Content-Type':fileType }, body:bytes,
       });
       const upload: any = await uploadResponse.json();
       if (!uploadResponse.ok || !upload.h) throw new BadRequestException(`Meta document upload failed: ${upload?.error?.message || uploadResponse.status}`);
-      const createResponse = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
+      const createResponse = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates`, {
         method:'POST', headers:{ Authorization:`Bearer ${config.access_token}`, 'Content-Type':'application/json' },
         body:JSON.stringify({ name:templateName, language:'en_US', category:'MARKETING', components:[
           { type:'HEADER', format:headerFormat, example:{ header_handle:[upload.h] } },
-          { type:'BODY', text:`Dear {{1}},\n\n{{2}}\n\n{{3}}\n\n{{4}}\n\nYour expert: *{{5}}* — tap a button below to get in touch.`, example:{ body_text:[['Mr. Ramesh','📥 Download your itinerary above👆.','Dreaming of a holiday but worried about planning and cost?','We have a ready itinerary with handpicked stays and sightseeing, all within your budget.',`Errances Voyages · ${national || '9443146955'}`]] } },
+          { type:'BODY', text:`Dear {{1}},\n\n{{2}}\n\n{{3}}\n\n{{4}}\n\nYour expert: *{{5}}* — tap a button below to get in touch.`, example:{ body_text:[['Mr. Ramesh','📥 Download your itinerary above👆.','Dreaming of a holiday but worried about planning and cost?','We have a ready itinerary with handpicked stays and sightseeing, all within your budget.',`Errances Voyages · ${national || '+33 1 23 45 67 89'}`]] } },
           { type:'BUTTONS', buttons: metaButtons },
         ]}),
       });
@@ -1141,7 +1179,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const current = rows[0];
     if (!current?.whatsapp_template_id || !String(current.whatsapp_template_name || '').startsWith('campaign_itinerary_v')) return null;
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const response = await fetch(`https://graph.facebook.com/${version}/${current.whatsapp_template_id}?fields=id,name,status,category,language,quality_score,rejected_reason,last_updated_time&access_token=${encodeURIComponent(config.access_token)}`);
+    const response = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${current.whatsapp_template_id}?fields=id,name,status,category,language,quality_score,rejected_reason,last_updated_time&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await response.json();
     if (!response.ok) throw new BadRequestException(`Could not read Meta template status: ${data?.error?.message || response.status}`);
     const status = String(data.status || 'PENDING').toUpperCase();
@@ -1173,7 +1211,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const templateId = rows[0]?.itinerary_template_id;
     if (!templateId) throw new BadRequestException('Template has not been submitted to Meta');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const response = await fetch(`https://graph.facebook.com/${version}/${templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
+    const response = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(config.access_token)}`);
     const data: any = await response.json();
     if (!response.ok) throw new BadRequestException(`Could not read Meta template status: ${data?.error?.message || response.status}`);
     const status = String(data.status || 'PENDING').toUpperCase();
@@ -1238,7 +1276,7 @@ export class WhatsAppBotService implements OnModuleInit {
     if (!config || !this.r2.isConfigured()) return null;
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
     const auth = { Authorization: `Bearer ${config.access_token}` };
-    const info: any = await (await fetch(`https://graph.facebook.com/${version}/${media.id}`, { headers: auth })).json();
+    const info: any = await (await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${media.id}`, { headers: auth })).json();
     if (!info?.url) return null;
     const file = await fetch(info.url, { headers: auth });
     if (!file.ok) return null;
@@ -1283,6 +1321,14 @@ export class WhatsAppBotService implements OnModuleInit {
     }
     this.notifyInbound(from, leadId, contactName, inboundText).catch(() => undefined);
 
+    // "STOP" takes a customer off bulk WhatsApp (recorded even when the message reaches us late);
+    // "START" puts them back. Their one-to-one chat with staff is not affected.
+    const word = String(message?.text?.body || '').trim().toLowerCase().replace(/[.!\s]+$/, '');
+    const optOut = ['stop', 'stop all', 'unsubscribe', 'arret', 'arrêt', 'arreter', 'arrêter', 'desabonner', 'désabonner'].includes(word);
+    if (optOut) await this.pool.query(`INSERT INTO whatsapp_opt_outs (phone) VALUES ($1) ON CONFLICT DO NOTHING`, [from]).catch(() => undefined);
+    const optIn = ['start', 'subscribe', 'reprendre'].includes(word)
+      && !!(await this.pool.query(`DELETE FROM whatsapp_opt_outs WHERE phone = $1`, [from]).catch(() => ({ rowCount: 0 }))).rowCount;
+
     // Recovered from Twilio's log after it could not reach the CRM: kept in the Inbox and notified
     // above, but never auto-answered hours later -- a person picks it up.
     if (message?.recovered) return;
@@ -1302,6 +1348,14 @@ export class WhatsAppBotService implements OnModuleInit {
     const config = await this.getConfig();
     if (!config) {
       this.logger.error('WhatsApp is not configured (Settings > WhatsApp) — cannot reply.');
+      return;
+    }
+
+    if (optOut || optIn) {
+      const reply = optOut
+        ? 'You will no longer receive offers from Errances Voyages on WhatsApp. Reply START to receive them again.\n\nVous ne recevrez plus nos offres sur WhatsApp. Répondez START pour les recevoir à nouveau.'
+        : 'Welcome back! You will receive offers from Errances Voyages on WhatsApp again.\n\nBon retour ! Vous recevrez à nouveau nos offres sur WhatsApp.';
+      await this.sendText(config, from, reply).then((result: any) => this.storeMessage(from, leadId ?? null, 'out', reply, 'text', result?.messages?.[0]?.id)).catch(() => undefined);
       return;
     }
 
@@ -1382,9 +1436,9 @@ export class WhatsAppBotService implements OnModuleInit {
         const orderedPk = pk[0] ? buildMetaButtons(pk[0]).ordered : [];
         const tapped = orderedPk[Number(position)]?.type === 'chat' ? orderedPk[Number(position)] : orderedPk.find((b) => b.type === 'chat');
         if (tapped?.type === 'chat') {
-          const chatMobile = normalizeIndianMobile(tapped.phone || buildMetaButtons(pk[0]).ordered.find((c) => c.type === 'call')?.phone || pk[0].contact_number);
+          const chatNumber = waNumber(tapped.phone || buildMetaButtons(pk[0]).ordered.find((c) => c.type === 'call')?.phone || pk[0].contact_number);
           const intro = tapped.reply?.trim() || 'Thank you for contacting Errances Voyages. Tap the link to chat with our travel expert on WhatsApp:';
-          if (chatMobile) customReply = `${intro}\nhttps://wa.me/91${chatMobile}`;
+          if (chatNumber) customReply = `${intro}\nhttps://wa.me/${chatNumber}`;
         }
       }
       await this.handleCallbackRequest(config, from, contactName, leadId, customReply);
@@ -1525,7 +1579,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const wantsPrice = /\b(price|cost|rate|charges?|how much|budget|discount|offer|quote|quotation|package amount)\b/.test(text);
 
     const contact = await this.getConsultantContact(leadId);
-    const callLine = contact.number ? `\n\nFor immediate assistance, call ${contact.name ? `${contact.name} on` : 'us on'} +91 ${contact.number.slice(0, 5)} ${contact.number.slice(5)}.` : '';
+    const callLine = contact.number ? `\n\nFor immediate assistance, call ${contact.name ? `${contact.name} on` : 'us on'} ${displayPhone(contact.number)}.` : '';
 
     if (quotation && (ack || wantsBooking)) {
       const { rows: l } = leadId ? await this.pool.query(`SELECT customer_name, phone FROM leads WHERE id=$1`, [leadId]) : { rows: [] as any[] };
@@ -1557,16 +1611,16 @@ export class WhatsAppBotService implements OnModuleInit {
   private async getConsultantContact(leadId?: string): Promise<{ name: string; number: string | null }> {
     if (leadId) {
       const { rows } = await this.pool.query(`SELECT u.full_name, u.phone FROM leads l JOIN users u ON u.id = l.assigned_to WHERE l.id = $1`, [leadId]).catch(() => ({ rows: [] as any[] }));
-      const number = normalizeIndianMobile(rows[0]?.phone);
+      const number = waNumber(rows[0]?.phone);
       if (number) return { name: rows[0].full_name, number };
     }
     const { rows: pkgs } = await this.pool.query(
       `SELECT contact_name, contact_number FROM tour_packages WHERE is_active = true AND is_deleted = false AND COALESCE(contact_number,'') <> '' ORDER BY updated_at DESC LIMIT 1`,
     ).catch(() => ({ rows: [] as any[] }));
-    const pkgNumber = normalizeIndianMobile(pkgs[0]?.contact_number);
+    const pkgNumber = waNumber(pkgs[0]?.contact_number);
     if (pkgNumber) return { name: pkgs[0].contact_name || '', number: pkgNumber };
     const profile = await this.getBusinessProfile().catch(() => null);
-    return { name: '', number: normalizeIndianMobile(profile?.phone) };
+    return { name: '', number: waNumber(profile?.phone) };
   }
 
   // Automatic reply to any customer message: contact our consultant (with the number).
@@ -1585,7 +1639,7 @@ export class WhatsAppBotService implements OnModuleInit {
     if (recent.length) return;
     const contact = await this.getConsultantContact(leadId);
     const lines = ['Thank you for contacting Errances Voyages.', '', 'Please contact our travel consultant — they will assist you with your tour.'];
-    if (contact.number) lines.push('', `📞 ${contact.name ? contact.name + ' · ' : ''}${contact.number}`, `Call or chat: https://wa.me/91${contact.number}`);
+    if (contact.number) lines.push('', `📞 ${contact.name ? contact.name + ' · ' : ''}${displayPhone(contact.number)}`, `Call or chat: https://wa.me/${contact.number}`);
     const text = lines.join('\n');
     // Keep Meta's own message id, or this bubble can never show a real tick -- the delivery
     // webhook has nothing to match it against, and it would sit on a fake single tick forever
@@ -1722,7 +1776,7 @@ export class WhatsAppBotService implements OnModuleInit {
       // Everything -- the thank-you copy, the itinerary, and the consultant's
       // contact -- goes out as ONE WhatsApp message (a document with a rich
       // caption), not three separate pings on the customer's phone.
-      const consultant = leadId ? await this.getConsultantForLead(leadId) : { full_name: 'Errances Voyages', phone: '9344465904' };
+      const consultant = leadId ? await this.getConsultantForLead(leadId) : { full_name: 'Errances Voyages', phone: '' };
       if ((pkg as any).contact_name) consultant.full_name = (pkg as any).contact_name;
       if ((pkg as any).contact_number) consultant.phone = (pkg as any).contact_number;
       const caption = this.buildItineraryCaption(pkg, consultant);
@@ -1808,10 +1862,11 @@ export class WhatsAppBotService implements OnModuleInit {
       phone: from,
       whatsappNumber: from,
       whatsappContactId: from,
-      source: 'meta_ads',
+      // From a click-to-WhatsApp ad (Meta sends the ad as "referral") or a customer who wrote in.
+      source: referral ? 'meta_ads' : 'whatsapp',
       status: 'new',
       whatsappStatus: 'new',
-      destination: this.config.get<string>('WHATSAPP_DEFAULT_TOUR_PLACE') || 'Vietnam',
+      destination: this.config.get<string>('WHATSAPP_DEFAULT_TOUR_PLACE') || 'To be confirmed',
       adName: referral?.headline,
       leadMonth: now.getMonth() + 1,
       leadYear: now.getFullYear(),
@@ -1914,13 +1969,13 @@ export class WhatsAppBotService implements OnModuleInit {
       return false;
     }
     const { rows: consultants } = await this.pool.query(
-      `SELECT COALESCE(u.full_name,'Errances Voyages') AS full_name, COALESCE(u.phone,'9344465904') AS phone
+      `SELECT COALESCE(u.full_name,'Errances Voyages') AS full_name, COALESCE(u.phone,'') AS phone
          FROM leads l LEFT JOIN users u ON u.id=l.assigned_to WHERE l.id=$1 LIMIT 1`, [leadId],
     );
     let anySent = false;
     let anyAlready = false;
     for (const pkg of ready) {
-      const consultant = { ...(consultants[0] || { full_name:'Errances Voyages', phone:'9344465904' }) };
+      const consultant = { ...(consultants[0] || { full_name:'Errances Voyages', phone:'' }) };
       if (pkg.contact_name) consultant.full_name = pkg.contact_name;
       if (pkg.contact_number) consultant.phone = pkg.contact_number;
       // This is the main automatic path (fires right after the welcome message is
@@ -1978,8 +2033,7 @@ export class WhatsAppBotService implements OnModuleInit {
   }
 
   private toWaNumber(phone: string | null): string | null {
-    const mobile = normalizeIndianMobile(phone || '');
-    return mobile ? `91${mobile}` : null;
+    return waNumber(phone);
   }
 
   async itineraryDeliveryStatus(packageId: string) {
@@ -2442,11 +2496,11 @@ export class WhatsAppBotService implements OnModuleInit {
 
   private async getConsultantForLead(leadId: string): Promise<{ full_name: string; phone: string }> {
     const { rows } = await this.pool.query(
-      `SELECT COALESCE(u.full_name, 'Errances Voyages') AS full_name, COALESCE(u.phone, '9344465904') AS phone
+      `SELECT COALESCE(u.full_name, 'Errances Voyages') AS full_name, COALESCE(u.phone, '') AS phone
          FROM leads l LEFT JOIN users u ON u.id = l.assigned_to WHERE l.id = $1 LIMIT 1`,
       [leadId],
     );
-    return rows[0] || { full_name: 'Errances Voyages', phone: '9344465904' };
+    return rows[0] || { full_name: 'Errances Voyages', phone: '' };
   }
 
   // One professional caption used everywhere we attach the itinerary
@@ -2498,7 +2552,7 @@ export class WhatsAppBotService implements OnModuleInit {
 
   private async getConfig(): Promise<WhatsAppConfig | null> {
     // Twilio takes over WhatsApp whenever its settings are present.
-    if (this.twilio.isConfigured()) return { provider: 'twilio', phone_number_id: 'twilio', business_account_id: 'twilio', access_token: '' };
+    if (this.twilio.isConfigured()) return { provider: 'twilio', phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token: TWILIO_PSEUDO_ID };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config
        WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`,
@@ -2537,7 +2591,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const configured = this.config.get<string>('META_APP_ID');
     if (configured) return configured;
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const response = await fetch(`https://graph.facebook.com/${version}/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${encodeURIComponent(accessToken)}`);
+    const response = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${encodeURIComponent(accessToken)}`);
     const data: any = await response.json();
     if (!response.ok || !data?.data?.app_id) throw new BadRequestException('Could not resolve the Meta App ID from the configured WhatsApp token');
     return String(data.data.app_id);
@@ -2616,6 +2670,7 @@ export class WhatsAppBotService implements OnModuleInit {
   async billingSummary() {
     const config = await this.getConfig();
     if (!config?.business_account_id) throw new BadRequestException('WhatsApp is not configured');
+    if (config.provider === 'twilio') return this.twilio.billing().catch((e) => { throw new BadRequestException(`Could not read billing from Twilio: ${e.message}`); });
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v23.0';
     const IST = 5.5 * 3600;
     const now = Math.floor(Date.now() / 1000);
@@ -2758,11 +2813,11 @@ export class WhatsAppBotService implements OnModuleInit {
     const atPosition = ordered[Number(position)];
     const button = atPosition?.type === 'chat' ? atPosition : ordered.find((b) => b.type === 'chat');
     if (!button) return null;
-    const mobile = normalizeIndianMobile(button.phone || ordered.find((c) => c.type === 'call')?.phone || rows[0].contact_number);
-    if (!mobile) return null;
+    const number = waNumber(button.phone || ordered.find((c) => c.type === 'call')?.phone || rows[0].contact_number);
+    if (!number) return null;
     const place = rows[0].destinations?.[0] || 'your trip';
     const text = (button.reply?.trim() || 'Hi, I am interested to know more about {destination}').replace(/\{destination\}/g, place);
-    return `https://wa.me/91${mobile}?text=${encodeURIComponent(text)}`;
+    return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
   }
 
   async sendAgentMessage(leadId: string, text: string, userId?: string, replyToWaId?: string) {
@@ -2876,7 +2931,10 @@ export class WhatsAppBotService implements OnModuleInit {
     if (!lead) throw new BadRequestException('Lead not found');
     const phone = lead.whatsapp_number || lead.phone;
     if (!phone) throw new BadRequestException('This lead has no phone number');
-    return this.sendReopenTemplate(phone, lead.customer_name, lead.destination || '', leadId);
+    // A lead saved under its phone number has no name to greet; "To be confirmed" is not a destination.
+    const name = /^\+?[\d\s]+$/.test(String(lead.customer_name || '').trim()) ? 'there' : lead.customer_name;
+    const destination = /^to be confirmed$/i.test(String(lead.destination || '').trim()) ? '' : lead.destination || '';
+    return this.sendReopenTemplate(phone, name, destination, leadId);
   }
 
   // The approved "travel_enquiry_welcome" template, sent only when staff press "Send template to
@@ -2885,8 +2943,7 @@ export class WhatsAppBotService implements OnModuleInit {
   private async sendReopenTemplate(to: string, customerName: string, destination: string, leadId: string) {
     const config = await this.getConfig();
     if (!config) throw new BadRequestException('WhatsApp is not configured');
-    const indian = normalizeIndianMobile(to);
-    const normalized = indian ? `91${indian}` : String(to).replace(/\D/g, '');
+    const normalized = waNumber(to) || String(to).replace(/\D/g, '');
     const name = customerName.slice(0, 60);
     const dest = (destination || 'your preferred destination').slice(0, 60);
     // The newer re-open message (no "Yes, send itinerary" button) once Meta has approved it.
@@ -2933,7 +2990,7 @@ export class WhatsAppBotService implements OnModuleInit {
       const config = await this.getConfig();
       if (!config?.business_account_id) return empty;
       const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-      const res = await fetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates?name=${encodeURIComponent(name)}&fields=name,components&access_token=${encodeURIComponent(config.access_token)}`);
+      const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${config.business_account_id}/message_templates?name=${encodeURIComponent(name)}&fields=name,components&access_token=${encodeURIComponent(config.access_token)}`);
       const data: any = await res.json();
       const comps: any[] = data?.data?.find((t: any) => t.name === name)?.components ?? [];
       const out = {
@@ -3183,10 +3240,10 @@ export class WhatsAppBotService implements OnModuleInit {
     await this.storeMessage(to, leadId, 'out', prompt, 'text', result?.messages?.[0]?.id, undefined, { buttons: buttons.map((b) => ({ type: 'QUICK_REPLY', text: b.title })) }).catch(() => undefined);
   }
 
-  // The expert's phone as customers should dial it (+91 XXXXX XXXXX), from the package's Call button.
+  // The expert's phone as customers should dial it, from the package's Call button.
   private expertNumber(pkg: any): string {
-    const mobile = normalizeIndianMobile(resolveButtons(pkg).find((b) => b.type === 'call')?.phone || pkg?.contact_number || '');
-    return mobile ? `+91 ${mobile.slice(0, 5)} ${mobile.slice(5)}` : '';
+    const number = waNumber(resolveButtons(pkg).find((b) => b.type === 'call')?.phone || pkg?.contact_number || '');
+    return number ? displayPhone(number) : '';
   }
   private async expertNumberFor(pkgId: string): Promise<string> {
     if (!pkgId) return '';

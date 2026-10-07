@@ -39,6 +39,7 @@ const DESCRIPTIONS: Record<string, string> = {
   quotations: 'Create, edit and send quotations',
   invoices: 'Invoices and payments',
   whatsapp: 'WhatsApp chats with their own leads',
+  whatsapp_broadcast: 'Send one WhatsApp template to many leads at once (costs money per message)',
   reports: 'Business analytics and reports',
   meta_quality: 'Meta ad lead-quality and tracking health',
 };

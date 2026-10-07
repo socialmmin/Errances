@@ -3,6 +3,8 @@ import { PushService } from '../../common/push/push.service';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { Inject } from '@nestjs/common';
+import { TwilioWhatsAppService, TWILIO_PSEUDO_ID } from '../integrations/whatsapp/twilio-whatsapp.service';
+import { waNumber } from '../integrations/whatsapp/whatsapp-bot.service';
 import { PG_POOL } from '../../common/db/pool.module';
 import { FinanceRepository } from './finance.repository';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -18,6 +20,7 @@ export class FinanceService implements OnModuleInit {
     @Inject(PG_POOL) private pool: Pool,
     private config: ConfigService,
     private push: PushService,
+    private twilio: TwilioWhatsAppService,
   ) {}
 
   findInvoices(params: { branchId?: string; status?: string; type?: string; visibleTo?: string }) {
@@ -54,10 +57,9 @@ export class FinanceService implements OnModuleInit {
     return this.recordPayment(invoiceId, dto, branchId, userId);
   }
 
-  // WhatsApp needs the country code: a bare 10-digit Indian mobile gets 91 in front.
+  // WhatsApp needs the country code (see waNumber: Indian mobiles get 91, French 0X numbers 33).
   private waNumber(phone: string) {
-    const d = String(phone || '').replace(/\D/g, '');
-    return d.length === 10 && /^[6-9]/.test(d) ? '91' + d : d.length === 11 && d.startsWith('0') ? '91' + d.slice(1) : d;
+    return waNumber(phone) || String(phone || '').replace(/\D/g, '');
   }
 
   private money(n: number) {
@@ -87,7 +89,7 @@ export class FinanceService implements OnModuleInit {
         ] } }
       : { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } };
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${cfg.phone_number_id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${cfg.access_token_encrypted}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${cfg.phone_number_id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${cfg.access_token_encrypted}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data: any = await res.json().catch(() => ({}));
     if (!res.ok) return { sent: false, usedTemplate: useTemplate, reason: useTemplate ? (data?.error?.message || 'WhatsApp refused the message') : 'The customer has not messaged in the last 24 hours, and the payment-receipt template is not approved yet' };
     // Keep a copy in the lead's chat so the Inbox shows what the customer received.
@@ -117,7 +119,7 @@ export class FinanceService implements OnModuleInit {
     chat_reopen: {
       name: 'chat_reopen_v1',
       body: 'Hello {{1}}, this is Errances Voyages regarding your {{2}} enquiry. Our travel expert is ready to help you plan your trip. Please reply to this message with your questions, or tap the button below and we will call you.',
-      example: ['Mr. Ramesh', 'Andaman'],
+      example: ['Mr. Martin', 'Bali'],
       quickReply: 'Call our experts',
       category: 'MARKETING',
     },
@@ -135,6 +137,7 @@ export class FinanceService implements OnModuleInit {
   }
 
   private async whatsappConfig() {
+    if (this.twilio.isConfigured()) return { phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token_encrypted: TWILIO_PSEUDO_ID };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`);
     const cfg = rows[0];
@@ -172,7 +175,7 @@ export class FinanceService implements OnModuleInit {
     if (def.button) components.push({ type: 'BUTTONS', buttons: [{ type: 'URL', text: 'View invoice', url: `${baseUrl}/i/{{1}}`, example: [`${baseUrl}/i/sample-token`] }] });
     if (def.quickReply) components.push({ type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: def.quickReply }] });
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${cfg.business_account_id}/message_templates`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${cfg.business_account_id}/message_templates`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${cfg.access_token_encrypted}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: def.name, language: 'en_US', category: def.category ?? 'UTILITY', components }),
@@ -191,7 +194,7 @@ export class FinanceService implements OnModuleInit {
     const existing = await this.getTemplate(kind);
     if (!existing.templateId) throw new BadRequestException('No template submitted yet');
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${existing.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(cfg.access_token_encrypted)}`);
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${existing.templateId}?fields=id,name,status,rejected_reason&access_token=${encodeURIComponent(cfg.access_token_encrypted)}`);
     const data: any = await res.json();
     if (!res.ok) throw new BadRequestException(data?.error?.message || 'Could not check template status');
     await this.pool.query(`UPDATE utility_templates SET template_status=$2, template_rejection_reason=$3, checked_at=now() WHERE kind=$1`,
@@ -232,7 +235,7 @@ export class FinanceService implements OnModuleInit {
     const useTemplate = tpl.templateStatus === 'APPROVED' && !!tpl.templateName;
     const to = this.waNumber(phone);
     const version = this.config.get<string>('META_GRAPH_API_VERSION') || 'v21.0';
-    const res = await fetch(`https://graph.facebook.com/${version}/${cfg.phone_number_id}/messages`, {
+    const res = await this.twilio.graphFetch(`https://graph.facebook.com/${version}/${cfg.phone_number_id}/messages`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${cfg.access_token_encrypted}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(useTemplate

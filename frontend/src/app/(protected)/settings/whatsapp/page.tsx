@@ -1,5 +1,6 @@
 'use client';
 
+import { tr } from '@/i18n';
 import { useState } from 'react';
 import { Plus, Pencil, MessageSquare } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -191,6 +192,22 @@ function ConfigTab() {
     await save.mutateAsync({ phoneNumberId, accessToken, businessAccountId: businessAccountId || undefined });
     toast('Configuration saved', 'success');
     setAccessToken('');
+  }
+
+  // Through Twilio the connection lives in the server's settings, not on this screen.
+  if (data?.provider === 'twilio') {
+    return (
+      <Card>
+        <CardContent className="max-w-md space-y-2 p-5">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-gold" />
+            <p className="text-sm font-semibold">{tr('WhatsApp through Twilio')}</p>
+          </div>
+          <p className="text-sm">{tr('Connected. Messages are sent and received on {number}.', { number: data.sender ?? '' })}</p>
+          <p className="text-xs text-muted-foreground">{tr('The Twilio account and number are set on the server. Connection health is under Settings → Integrations.')}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

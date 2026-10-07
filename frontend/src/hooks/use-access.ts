@@ -23,6 +23,7 @@ export const PATH_ACCESS: { prefix: string; key: string }[] = [
   { prefix: '/vendors', key: 'invoices' },
   { prefix: '/finance/report', key: 'invoices' },
   { prefix: '/whatsapp', key: 'whatsapp' },
+  { prefix: '/bulk-whatsapp', key: 'whatsapp_broadcast' },
   { prefix: '/reports', key: 'reports' },
   { prefix: '/meta-quality', key: 'meta_quality' },
 ];

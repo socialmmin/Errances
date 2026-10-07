@@ -172,6 +172,7 @@ export interface WhatsAppHealth {
   inboundCount: number; lastInboundAt: string | null; lastRejectedAt: string | null;
   qualityRating: 'GREEN' | 'YELLOW' | 'RED' | null; throughputTier: string | null;
   recentOutboundCount: number; inboundStale: boolean;
+  provider?: 'twilio'; sender?: string; senderName?: string | null; senderStatus?: string | null;
 }
 
 export function useWhatsAppHealth() {
@@ -252,7 +253,7 @@ export function useRetryAllFailed() {
 }
 
 export interface WhatsAppBilling {
-  currency: string; monthStart: string; totalCost: number; gstRate: number; estimatedGst: number; estimatedTotal: number; todayCost: number;
+  provider?: 'twilio'; balance?: number; currency: string; monthStart: string; totalCost: number; gstRate: number; estimatedGst: number; estimatedTotal: number; todayCost: number;
   byCategory: { category: string; volume: number; cost: number }[]; days: { date: string; volume: number; cost: number }[]; updatedAt: string;
 }
 

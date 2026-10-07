@@ -2,7 +2,7 @@
 
 import { useQuotationStats } from '@/hooks/use-quotations';
 import { useInvoices, usePaymentReminders } from '@/hooks/use-finance';
-import { BellRing, Store, Wallet } from 'lucide-react';
+import { BellRing, Megaphone, Store, Wallet } from 'lucide-react';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -48,6 +48,7 @@ export const NAV_ITEMS = [
   { href: '/vendors', access: 'invoices', label: 'Vendors', icon: Store },
   { href: '/finance/report', access: 'invoices', label: 'Finance', icon: Wallet },
   { href: '/whatsapp', access: 'whatsapp', label: 'WhatsApp Inbox', icon: MessageCircle },
+  { href: '/bulk-whatsapp', access: 'whatsapp_broadcast', label: 'Bulk WhatsApp', icon: Megaphone },
   { href: '/reports', access: 'reports', label: 'Reports', icon: BarChart3 },
   { href: '/meta-quality', access: 'meta_quality', label: 'Meta Quality', icon: Target },
   { href: '/callback-requests', access: 'callbacks', label: 'Callback Requests', icon: PhoneCall },

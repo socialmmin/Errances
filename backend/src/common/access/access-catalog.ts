@@ -43,6 +43,7 @@ export const ACCESS_CATALOG: AccessItem[] = [
   { key: 'quotations', label: 'Quotations', defaultFrom: [PERMISSIONS.QUOTATIONS_VIEW], grants: [PERMISSIONS.QUOTATIONS_VIEW, PERMISSIONS.QUOTATIONS_CREATE, PERMISSIONS.QUOTATIONS_EDIT, PERMISSIONS.QUOTATIONS_SEND] },
   { key: 'invoices', label: 'Invoices', defaultFrom: [PERMISSIONS.FINANCE_VIEW], grants: [PERMISSIONS.FINANCE_VIEW, PERMISSIONS.FINANCE_COLLECT_PAYMENT] },
   { key: 'whatsapp', label: 'WhatsApp Inbox', defaultFrom: [PERMISSIONS.LEADS_VIEW], grants: [PERMISSIONS.LEADS_VIEW, PERMISSIONS.LEADS_EDIT] },
+  { key: 'whatsapp_broadcast', label: 'Bulk WhatsApp', sensitive: true, defaultOn: false, grants: [PERMISSIONS.LEADS_VIEW] },
   { key: 'reports', label: 'Reports', defaultOn: false, grants: [PERMISSIONS.REPORTS_VIEW] },
   { key: 'meta_quality', label: 'Meta Quality', defaultOn: false, grants: [PERMISSIONS.REPORTS_VIEW] },
 ];
