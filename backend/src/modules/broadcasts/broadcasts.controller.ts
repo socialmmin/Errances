@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequireAccess } from '../../common/access/access.service';
-import { Audience, BroadcastsService, VariableSource } from './broadcasts.service';
+import { Audience, BroadcastsService, NewTemplate, VariableSource } from './broadcasts.service';
 
 // Bulk WhatsApp -- the "Bulk WhatsApp" page; only people given that page in their access settings.
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -13,6 +13,18 @@ export class BroadcastsController {
 
   @Get('templates')
   templates() { return this.broadcasts.templates(); }
+
+  @Post('templates')
+  createTemplate(@Body() body: NewTemplate) { return this.broadcasts.createTemplate(body); }
+
+  @Delete('templates/:sid')
+  deleteTemplate(@Param('sid') sid: string) { return this.broadcasts.deleteTemplate(sid); }
+
+  @Post('test')
+  testSend(@Body() body: { contentSid: string; variables: Record<string, VariableSource>; phone: string }) { return this.broadcasts.testSend(body); }
+
+  @Get('test/:sid')
+  testStatus(@Param('sid') sid: string) { return this.broadcasts.testStatus(sid); }
 
   @Get('filters')
   filters() { return this.broadcasts.filters(); }

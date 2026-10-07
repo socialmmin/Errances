@@ -1,4 +1,5 @@
 'use client';
+import { PackagesSectionTabs } from '@/components/packages/section-tabs';
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -336,6 +337,7 @@ export default function PackagesPage() {
     : { stage: 'try', label: 'Stage 4–5 · approved — test and activate' };
 
   return <div className="space-y-5 pb-8">
+    <PackagesSectionTabs />
     <div><p className="text-xs font-bold uppercase tracking-[.2em] text-gold">Automation workspace</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-navy dark:text-white">Packages &amp; Itinerary</h1><p className="mt-1 text-sm text-muted-foreground">Map campaigns, test documents and monitor every WhatsApp delivery.</p></div>
 
     <div className="grid overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-slate-900 to-navy-950 text-white shadow-xl lg:grid-cols-[1.1fr_1.4fr]">

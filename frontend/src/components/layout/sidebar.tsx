@@ -2,7 +2,7 @@
 
 import { useQuotationStats } from '@/hooks/use-quotations';
 import { useInvoices, usePaymentReminders } from '@/hooks/use-finance';
-import { BellRing, Megaphone, Store, Wallet } from 'lucide-react';
+import { BellRing, Store, Wallet } from 'lucide-react';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -41,6 +41,7 @@ import { tr } from '@/i18n';
 export const NAV_ITEMS = [
   { href: '/dashboard', access: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/leads', access: 'leads', label: 'Leads', icon: Users },
+  // Also holds Bulk WhatsApp (a tab on the page): shown to anyone allowed either of the two.
   { href: '/packages', access: 'packages', label: 'Packages & Itinerary', icon: MapPinned },
   { href: '/quotations', access: 'quotations', label: 'Quotations', icon: FileText },
   { href: '/finance/invoices', access: 'invoices', label: 'Invoices', icon: Receipt },
@@ -48,7 +49,6 @@ export const NAV_ITEMS = [
   { href: '/vendors', access: 'invoices', label: 'Vendors', icon: Store },
   { href: '/finance/report', access: 'invoices', label: 'Finance', icon: Wallet },
   { href: '/whatsapp', access: 'whatsapp', label: 'WhatsApp Inbox', icon: MessageCircle },
-  { href: '/bulk-whatsapp', access: 'whatsapp_broadcast', label: 'Bulk WhatsApp', icon: Megaphone },
   { href: '/reports', access: 'reports', label: 'Reports', icon: BarChart3 },
   { href: '/meta-quality', access: 'meta_quality', label: 'Meta Quality', icon: Target },
   { href: '/callback-requests', access: 'callbacks', label: 'Callback Requests', icon: PhoneCall },
@@ -145,8 +145,10 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 py-4 [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
-        {navItems.filter((item) => can(item.access)).map((item) => {
-          const active = pathname.startsWith(item.href);
+        {navItems.filter((item) => can(item.access) || (item.href === '/packages' && can('whatsapp_broadcast'))).map((item) => {
+          const active = pathname.startsWith(item.href) || (item.href === '/packages' && pathname.startsWith('/bulk-whatsapp'));
+          // Someone with Bulk WhatsApp but not Packages lands on the tab they can open.
+          const href = item.href === '/packages' && !can('packages') ? '/bulk-whatsapp' : item.href;
           const Icon = item.icon;
           return (
             <div
@@ -156,7 +158,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
               className={cn('group relative flex items-center rounded-lg transition-all', dragHref === item.href && 'opacity-40', active ? 'bg-gold shadow-[0_8px_20px_-10px_rgba(245,158,11,.9)]' : 'hover:bg-white/5')}
             >
               <Link
-                href={item.href}
+                href={href}
                 draggable={false}
                 className={cn('flex flex-1 items-center rounded-lg py-2.5 text-sm font-medium', collapsed ? 'justify-center px-2' : 'gap-3 px-3', active ? 'text-navy' : 'text-slate-400 group-hover:text-slate-100')}
               >

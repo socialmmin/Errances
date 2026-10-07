@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCheck, Megaphone, Pause, Play, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,8 +12,12 @@ import { tr, locale } from '@/i18n';
 import {
   BroadcastAudience, BroadcastRow, BroadcastVariable, useBroadcast, useBroadcastActions, useBroadcastFilters, useBroadcastPreview, useBroadcasts, useBroadcastTemplates,
 } from '@/hooks/use-broadcasts';
+import { TemplateManager } from '@/components/broadcasts/template-manager';
+import { TestSend } from '@/components/broadcasts/test-send';
+import { PackagesSectionTabs } from '@/components/packages/section-tabs';
 
-const selectClass = 'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground';
+const selectBase = 'h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground';
+const selectClass = selectBase + ' w-full';
 const money = (amount: number, currency: string) => new Intl.NumberFormat(locale(), { style: 'currency', currency }).format(amount);
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—');
 const label = (value: string) => tr(value.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()));
@@ -64,13 +68,16 @@ export default function BulkWhatsAppPage() {
     return () => clearTimeout(t);
   }, [destination]);
 
-  const template = useMemo(() => (templates.data ?? []).find((t) => t.sid === contentSid) ?? null, [templates.data, contentSid]);
+  // Only templates WhatsApp has approved can be sent; the rest are listed under Templates.
+  const approved = useMemo(() => (templates.data ?? []).filter((t) => t.status === 'APPROVED'), [templates.data]);
+  const template = useMemo(() => approved.find((t) => t.sid === contentSid) ?? null, [approved, contentSid]);
+  const sendRef = useRef<HTMLDivElement>(null);
   const preview = useBroadcastPreview(audience, contentSid);
   const detail = useBroadcast(openId);
 
   function chooseTemplate(sid: string) {
     setContentSid(sid);
-    const t = (templates.data ?? []).find((x) => x.sid === sid);
+    const t = approved.find((x) => x.sid === sid);
     const next: Record<string, BroadcastVariable> = {};
     // The first variable in a message is nearly always the customer's name.
     for (const v of t?.variables ?? []) next[String(v.number)] = v.inBody && v.number === 1 ? { source: 'name' } : { source: 'text', value: v.inBody ? '' : v.sample };
@@ -114,6 +121,7 @@ export default function BulkWhatsAppPage() {
 
   return (
     <div className="space-y-5">
+      <PackagesSectionTabs />
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-navy dark:text-white"><Megaphone className="h-6 w-6 text-gold" />{tr('Bulk WhatsApp')}</h1>
         <p className="text-sm text-muted-foreground">{tr('Send one approved WhatsApp template to many leads at once. Customers who replied STOP are never included.')}</p>
@@ -127,6 +135,9 @@ export default function BulkWhatsAppPage() {
         </div>
       )}
 
+      <TemplateManager onUse={(sid) => { chooseTemplate(sid); sendRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
+
+      <div ref={sendRef} className="-mb-5 scroll-mt-4" />
       <Card>
         <CardContent className="grid gap-6 p-5 lg:grid-cols-2">
           <div className="space-y-4">
@@ -134,10 +145,10 @@ export default function BulkWhatsAppPage() {
               <Label>{tr('1. Template')}</Label>
               <select className={`${selectClass} mt-1`} value={contentSid} onChange={(e) => chooseTemplate(e.target.value)}>
                 <option value="">{templates.isLoading ? tr('Loading templates…') : tr('Choose an approved template')}</option>
-                {(templates.data ?? []).map((t) => <option key={t.sid} value={t.sid}>{t.name} · {label(t.category.toLowerCase())} · {t.language}</option>)}
+                {approved.map((t) => <option key={t.sid} value={t.sid}>{t.name} · {label(t.category.toLowerCase())} · {t.language}</option>)}
               </select>
               {templates.isError && <p className="mt-1 text-xs font-semibold text-red-600">{(templates.error as Error).message}</p>}
-              {!templates.isLoading && !templates.data?.length && !templates.isError && <p className="mt-1 text-xs text-muted-foreground">{tr('No approved template yet. Templates are approved by WhatsApp before they can be sent in bulk.')}</p>}
+              {!templates.isLoading && !approved.length && !templates.isError && <p className="mt-1 text-xs text-muted-foreground">{tr('No approved template yet. Templates are approved by WhatsApp before they can be sent in bulk.')}</p>}
             </div>
 
             {template && template.variables.length > 0 && (
@@ -149,7 +160,7 @@ export default function BulkWhatsAppPage() {
                   return (
                     <div key={key} className="flex flex-wrap items-center gap-2">
                       <span className="w-12 shrink-0 rounded bg-slate-100 px-2 py-1 text-center font-mono text-xs">{`{{${v.number}}}`}</span>
-                      <select className={`${selectClass} w-44`} value={cur.source} onChange={(e) => setVariables((all) => ({ ...all, [key]: { source: e.target.value as BroadcastVariable['source'], value: cur.value } }))}>
+                      <select className={`${selectBase} w-44 shrink-0`} value={cur.source} onChange={(e) => setVariables((all) => ({ ...all, [key]: { source: e.target.value as BroadcastVariable['source'], value: cur.value } }))}>
                         {v.inBody && <option value="name">{tr('Customer name')}</option>}
                         {v.inBody && <option value="destination">{tr('Destination')}</option>}
                         <option value="text">{tr('Same text for everyone')}</option>
@@ -207,6 +218,7 @@ export default function BulkWhatsAppPage() {
                   {!!p.sample.length && <p className="mt-2 text-xs text-muted-foreground">{tr('For example')}: {p.sample.slice(0, 5).map((s) => s.name || `+${s.phone}`).join(', ')}{p.count > 5 ? '…' : ''}</p>}
                 </>
               )}
+              <div className="mt-3"><TestSend contentSid={contentSid} variables={variables} ready={!!template && !missingText} /></div>
               <div className="mt-3"><p className="text-xs font-semibold text-muted-foreground">{tr('Name for this bulk send (only you see it)')}</p><Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('e.g. Summer offer - June')} maxLength={80} /></div>
               {missingText && <p className="mt-2 text-xs font-semibold text-red-600">{tr('Fill in every blank of the template first.')}</p>}
               <Button variant="gold" className="mt-3 w-full" disabled={!canSend} onClick={send}><Send className="mr-2 h-4 w-4" />{create.isPending ? tr('Starting…') : tr('Send to {n} customers', { n: p?.count ?? 0 })}</Button>

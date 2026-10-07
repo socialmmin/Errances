@@ -3,9 +3,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 
+export type TemplateStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAUSED' | 'DISABLED';
 export interface BroadcastTemplate {
   sid: string; name: string; category: string; language: string; kind: string; body: string; footer: string | null;
   hasMedia: boolean; buttons: string[]; variables: { number: number; sample: string; inBody: boolean }[];
+  status: TemplateStatus; rejectionReason: string | null; createdAt: string | null;
+  // Written on the Bulk WhatsApp page (so it can be deleted there).
+  createdHere: boolean;
+}
+export interface NewTemplateInput {
+  name: string; category: 'MARKETING' | 'UTILITY'; language: 'en' | 'fr'; body: string; samples: string[]; footer?: string;
+  buttons?: { type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'; text: string; url?: string; phone?: string }[];
+  headerObjectKey?: string; headerFileName?: string;
 }
 export interface BroadcastAudience {
   statuses?: string[]; sources?: string[]; destination?: string; assignedTo?: string[]; createdFrom?: string; createdTo?: string; onlyChatted?: boolean;
@@ -29,8 +38,39 @@ export interface BroadcastDetail extends BroadcastRow {
   recipients: { lead_id: string | null; phone: string; name: string | null; status: string; error: string | null; sent_at: string | null }[];
 }
 
+// Every template submitted to WhatsApp. Re-read often while one is waiting for WhatsApp's
+// decision, so its status changes on the page by itself.
 export function useBroadcastTemplates() {
-  return useQuery({ queryKey: ['broadcasts', 'templates'], queryFn: () => api.get<BroadcastTemplate[]>('/broadcasts/templates'), staleTime: 60_000 });
+  return useQuery({
+    queryKey: ['broadcasts', 'templates'],
+    queryFn: () => api.get<BroadcastTemplate[]>('/broadcasts/templates'),
+    staleTime: 15_000,
+    refetchInterval: (q) => ((q.state.data ?? []).some((t) => t.status === 'PENDING') ? 20_000 : 120_000),
+  });
+}
+
+export function useTemplateActions() {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: ['broadcasts', 'templates'] });
+  const create = useMutation({ mutationFn: (input: NewTemplateInput) => api.post<{ sid: string; name: string; status: TemplateStatus }>('/broadcasts/templates', input), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (sid: string) => api.delete(`/broadcasts/templates/${sid}`), onSuccess: refresh });
+  return { create, remove };
+}
+
+export function useTestSend() {
+  return useMutation({
+    mutationFn: (input: { contentSid: string; variables: Record<string, BroadcastVariable>; phone: string }) => api.post<{ sid: string; to: string; leadId: string | null }>('/broadcasts/test', input),
+  });
+}
+
+// Where a test message stands; asked every few seconds until WhatsApp delivers or refuses it.
+export function useTestStatus(sid: string | null) {
+  return useQuery({
+    queryKey: ['broadcasts', 'test', sid],
+    queryFn: () => api.get<{ status: string; error: string | null }>(`/broadcasts/test/${sid}`),
+    enabled: !!sid,
+    refetchInterval: (q) => (['delivered', 'read', 'failed'].includes(q.state.data?.status ?? '') || q.state.dataUpdateCount > 40 ? false : 3000),
+  });
 }
 
 export function useBroadcastFilters() {

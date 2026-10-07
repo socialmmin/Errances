@@ -343,7 +343,7 @@ export class TwilioWhatsAppService implements OnModuleInit {
       if (!handle.startsWith('twsample:')) throw new Error('The template sample file is missing');
       const sampleKey = handle.slice('twsample:'.length);
       mediaVar = next++;
-      variables[String(mediaVar)] = await this.mediaLink({ objectKey: sampleKey }, defaultFileName(headerFormat.toLowerCase(), sampleKey), true);
+      variables[String(mediaVar)] = await this.mediaLink({ objectKey: sampleKey }, String(header.example?.file_name || '') || defaultFileName(headerFormat.toLowerCase(), sampleKey), true);
       media = [`${this.apiBase()}/api/wa-media/{{${mediaVar}}}`];
     }
 
@@ -440,7 +440,7 @@ export class TwilioWhatsAppService implements OnModuleInit {
     return [{ ...s, name: rows[0].name, language: rows[0].meta?.def?.language || 'en_US', components: rows[0].meta?.def?.components ?? [] }];
   }
 
-  private async deleteTemplate(name: string) {
+  async deleteTemplate(name: string) {
     const { rows } = await this.pool.query(`DELETE FROM twilio_contents WHERE key = $1 RETURNING content_sid`, [`template:${name}`]);
     for (const r of rows) await fetch(`https://content.twilio.com/v1/Content/${r.content_sid}`, { method: 'DELETE', headers: { Authorization: this.authHeader() } }).catch(() => undefined);
     return { success: true };
@@ -599,9 +599,25 @@ export class TwilioWhatsAppService implements OnModuleInit {
     return result.messages[0].id;
   }
 
-  // Every WhatsApp-approved template in the Twilio account (the CRM's and any made in the Twilio
-  // console), with its text and variable numbers, for choosing one to send in bulk.
+  // Where one sent message stands right now, straight from Twilio (for a test send, which has no
+  // lead or bulk row to follow its status webhook).
+  async messageStatus(messageSid: string): Promise<{ status: string; error: string | null }> {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${this.sid}/Messages/${messageSid}.json`, { headers: { Authorization: this.authHeader() } });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.message || `Twilio ${res.status}`);
+    const failed = ['failed', 'undelivered'].includes(String(data.status));
+    const code = data.error_code ? Number(data.error_code) : null;
+    return { status: failed ? 'failed' : String(data.status || 'queued'), error: failed ? (code ? TWILIO_ERRORS[code] || data.error_message || `Twilio error ${code}` : data.error_message || 'Delivery failed') : null };
+  }
+
+  // The WhatsApp-approved templates, for choosing one to send in bulk.
   async approvedTemplates(): Promise<ApprovedTemplate[]> {
+    return (await this.listTemplates()).filter((t) => t.status === 'APPROVED');
+  }
+
+  // Every template in the Twilio account that was submitted to WhatsApp (the CRM's and any made
+  // in the Twilio console), with its approval state, text and variable numbers.
+  async listTemplates(): Promise<ApprovedTemplate[]> {
     const out: ApprovedTemplate[] = [];
     let url = 'https://content.twilio.com/v1/ContentAndApprovals?PageSize=500';
     for (let page = 0; url && page < 10; page++) {
@@ -609,7 +625,8 @@ export class TwilioWhatsAppService implements OnModuleInit {
       const data: any = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(`Could not list Twilio templates: ${data?.message || res.status}`);
       for (const c of data?.contents ?? []) {
-        if (String(c?.approval_requests?.status || '').toLowerCase() !== 'approved') continue;
+        const approval = String(c?.approval_requests?.status || 'unsubmitted').toLowerCase();
+        if (approval === 'unsubmitted') continue;
         const types = c.types || {};
         const kind = Object.keys(types)[0] || '';
         const t = types[kind] || {};
@@ -620,6 +637,8 @@ export class TwilioWhatsAppService implements OnModuleInit {
           language: c.language, kind, body, footer: t.subtitle ? String(t.subtitle) : null,
           hasMedia: !!(t.media?.length), buttons: (t.actions ?? []).map((a: any) => String(a.title || '')).filter(Boolean),
           variables: numbers.map((n) => ({ number: n, sample: String(c.variables?.[String(n)] ?? ''), inBody: body.includes(`{{${n}}}`) })),
+          status: APPROVAL_STATUS[approval] || 'PENDING', rejectionReason: c.approval_requests?.rejection_reason ? readableRejection(String(c.approval_requests.rejection_reason)) : null,
+          createdAt: c.date_created ?? null,
         });
       }
       url = data?.meta?.next_page_url || '';
@@ -699,6 +718,13 @@ export class TwilioWhatsAppService implements OnModuleInit {
   }
 }
 
+// WhatsApp's rejection text often arrives wrapped in an API error dump ("Problem: ..., Reason:
+// type=OAuthException, code=100, ..., userMessage=<the sentence a person needs>, message=...").
+function readableRejection(raw: string) {
+  const user = /userMessage=(.+?)(?:,\s*message=|$)/.exec(raw)?.[1]?.trim();
+  return (user || raw).replace(/\.+$/, '') + '.';
+}
+
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -736,6 +762,8 @@ function safeFileName(name: string) {
 export interface ApprovedTemplate {
   sid: string; name: string; category: string; language: string; kind: string; body: string; footer: string | null;
   hasMedia: boolean; buttons: string[]; variables: { number: number; sample: string; inBody: boolean }[];
+  // APPROVED | PENDING | REJECTED | PAUSED | DISABLED
+  status: string; rejectionReason: string | null; createdAt: string | null;
 }
 
 export interface TwilioHealth {

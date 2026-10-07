@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { PG_POOL } from '../../common/db/pool.module';
 import { TwilioWhatsAppService } from '../integrations/whatsapp/twilio-whatsapp.service';
 import { waNumber } from '../integrations/whatsapp/whatsapp-bot.service';
+import { R2Service } from '../../common/r2/r2.service';
 
 export interface Audience {
   statuses?: string[];
@@ -16,6 +17,20 @@ export interface Audience {
 }
 // Where each template variable's value comes from, per recipient.
 export type VariableSource = { source: 'name' | 'destination' | 'text'; value?: string };
+// A template written on the Bulk WhatsApp page, before it is submitted to WhatsApp.
+export interface NewTemplate {
+  name: string;
+  category: 'MARKETING' | 'UTILITY';
+  language: 'en' | 'fr';
+  body: string;
+  // Example value for each blank {{1}}, {{2}}... in order -- WhatsApp's reviewers see these.
+  samples: string[];
+  footer?: string;
+  buttons?: { type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'; text: string; url?: string; phone?: string }[];
+  // An uploaded image or PDF shown above the message.
+  headerObjectKey?: string;
+  headerFileName?: string;
+}
 
 // Meta's charge per template message by the recipient's country code, in USD (approximate,
 // from Meta's 2025 rate card -- for a cost preview only; Twilio's bill is the real figure).
@@ -40,7 +55,7 @@ export class BroadcastsService implements OnModuleInit {
   private logger = new Logger('Broadcasts');
   private ticking = false;
 
-  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService) {}
+  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService, private r2: R2Service) {}
 
   onModuleInit() {
     setInterval(() => {
@@ -54,9 +69,143 @@ export class BroadcastsService implements OnModuleInit {
     if (!this.twilio.isConfigured()) throw new BadRequestException('Bulk WhatsApp needs the Twilio WhatsApp sender to be configured');
   }
 
-  templates() {
+  // Every template submitted to WhatsApp with its approval state; the ones written on this page
+  // (and so safe to delete here) are marked.
+  async templates() {
     this.assertTwilio();
-    return this.twilio.approvedTemplates();
+    const [all, { rows }] = await Promise.all([
+      this.twilio.listTemplates(),
+      this.pool.query(`SELECT content_sid FROM twilio_contents WHERE meta->>'origin' = 'bulk'`),
+    ]);
+    const mine = new Set(rows.map((r) => r.content_sid));
+    return all.map((t) => ({ ...t, createdHere: mine.has(t.sid) }));
+  }
+
+  // Checks a template the way WhatsApp will, so mistakes are explained here and not by a
+  // rejection hours later; then creates it in Twilio and submits it for approval.
+  async createTemplate(input: NewTemplate) {
+    this.assertTwilio();
+    const name = String(input?.name || '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+    if (!name) throw new BadRequestException('Give the template a name');
+    const category = input.category === 'UTILITY' ? 'UTILITY' : 'MARKETING';
+    const body = String(input.body || '').trim();
+    if (!body) throw new BadRequestException('Write the message text');
+    if (body.length > 1024) throw new BadRequestException('The message text can be at most 1,024 characters');
+    const numbers = [...new Set([...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+    if (/\{\{(?!\d+\}\})/.test(body)) throw new BadRequestException('Blanks must be written {{1}}, {{2}}... with a number inside');
+    if (numbers.some((n, i) => n !== i + 1)) throw new BadRequestException('Number the blanks in order without gaps: {{1}}, {{2}}, {{3}}...');
+    if (/^\{\{\d+\}\}/.test(body) || /\{\{\d+\}\}$/.test(body)) throw new BadRequestException('WhatsApp does not accept a message that starts or ends with a blank -- add some words before the first and after the last one');
+    if (/\{\{\d+\}\}\s*\{\{\d+\}\}/.test(body)) throw new BadRequestException('Put some words between two blanks');
+    const samples = numbers.map((n) => String(input.samples?.[n - 1] || '').trim());
+    if (samples.some((v) => !v)) throw new BadRequestException('Give an example for every blank -- WhatsApp needs them to review the template');
+    const footer = String(input.footer || '').trim();
+    if (footer.length > 60) throw new BadRequestException('The footer can be at most 60 characters');
+
+    const buttons = (input.buttons ?? []).filter((b) => String(b?.text || '').trim());
+    if (buttons.length > 3) throw new BadRequestException('A template can have up to 3 buttons');
+    const metaButtons = buttons.map((b) => {
+      const text = String(b.text).trim();
+      if (text.length > 25) throw new BadRequestException(`Button text "${text}" is longer than 25 characters`);
+      if (b.type === 'URL') {
+        const url = String(b.url || '').trim();
+        if (!/^https:\/\/\S+\.\S+$/.test(url)) throw new BadRequestException(`The "${text}" button needs a full link starting with https://`);
+        return { type: 'URL', text, url };
+      }
+      if (b.type === 'PHONE_NUMBER') {
+        const number = waNumber(b.phone);
+        if (!number) throw new BadRequestException(`The "${text}" button needs a valid phone number, for example 06 12 34 56 78 or +33 6 12 34 56 78`);
+        return { type: 'PHONE_NUMBER', text, phone_number: '+' + number };
+      }
+      return { type: 'QUICK_REPLY', text };
+    });
+
+    const components: any[] = [];
+    if (input.headerObjectKey) {
+      const file = await this.r2.getObject(input.headerObjectKey);
+      if (!file) throw new BadRequestException('The uploaded image or document could not be found -- upload it again');
+      const isImage = /^image\/(jpeg|png)$/.test(file.contentType);
+      if (!isImage && file.contentType !== 'application/pdf') throw new BadRequestException('The header must be a JPG or PNG image, or a PDF');
+      if (file.body.length > (isImage ? 5 : 16) * 1024 * 1024) throw new BadRequestException(isImage ? 'The image must be under 5 MB' : 'The PDF must be under 16 MB');
+      components.push({ type: 'HEADER', format: isImage ? 'IMAGE' : 'DOCUMENT', example: { header_handle: [`twsample:${input.headerObjectKey}`], file_name: String(input.headerFileName || '').trim() || undefined } });
+    }
+    components.push({ type: 'BODY', text: body, ...(samples.length ? { example: { body_text: [samples] } } : {}) });
+    if (footer) components.push({ type: 'FOOTER', text: footer });
+    if (metaButtons.length) components.push({ type: 'BUTTONS', buttons: metaButtons });
+
+    const existing = await this.twilio.listTemplates();
+    if (existing.some((t) => t.name === name)) throw new BadRequestException(`A template called "${name}" already exists -- choose another name`);
+    let created: { id: string; status: string };
+    try {
+      created = await this.twilio.createTemplate({ name, language: input.language === 'fr' ? 'fr' : 'en_US', category, components });
+    } catch (e: any) {
+      throw new BadRequestException(String(e.message || e));
+    }
+    await this.pool.query(`UPDATE twilio_contents SET meta = COALESCE(meta, '{}'::jsonb) || '{"origin":"bulk"}'::jsonb WHERE content_sid = $1`, [created.id]);
+    this.logger.log(`Template ${name} written on the Bulk WhatsApp page and submitted (${created.id})`);
+    return { sid: created.id, name, status: created.status };
+  }
+
+  // Only templates written on this page: the itinerary, payment and report templates belong to
+  // their own screens, and deleting one of those here would break what sends it.
+  async deleteTemplate(sid: string) {
+    this.assertTwilio();
+    const { rows } = await this.pool.query(`SELECT name FROM twilio_contents WHERE content_sid = $1 AND meta->>'origin' = 'bulk'`, [sid]);
+    if (!rows[0]) throw new BadRequestException('Only templates created on this page can be deleted here');
+    const { rows: busy } = await this.pool.query(`SELECT 1 FROM whatsapp_broadcasts WHERE content_sid = $1 AND status IN ('sending', 'waiting', 'paused') LIMIT 1`, [sid]);
+    if (busy.length) throw new BadRequestException('A bulk send is still using this template -- cancel it or let it finish first');
+    await this.twilio.deleteTemplate(rows[0].name);
+    return { ok: true };
+  }
+
+  private resolveVariables(variables: Record<string, VariableSource>, customerName: string, leadDestination: string) {
+    const first = String(customerName || '').trim();
+    // A lead saved under its phone number, or as ".", has no real name to greet.
+    const name = /\p{L}/u.test(first) ? first.slice(0, 60) : 'there';
+    const destination = String(leadDestination || '').trim();
+    const vars: Record<string, string> = {};
+    for (const [n, src] of Object.entries(variables || {})) {
+      vars[n] = src.source === 'name' ? name
+        : src.source === 'destination' ? (destination && !/to be confirmed/i.test(destination) ? destination : 'your next trip')
+        : String(src.value || '').trim() || '-';
+    }
+    return vars;
+  }
+
+  // One message to one number typed in by hand, to see the template on a real phone before a bulk
+  // send. If the number belongs to a lead, that lead's name and destination fill the blanks and
+  // the message is kept in their chat.
+  async testSend(input: { contentSid: string; variables: Record<string, VariableSource>; phone: string }) {
+    this.assertTwilio();
+    const phone = waNumber(input?.phone);
+    if (!phone) throw new BadRequestException('Enter a valid WhatsApp number, for example 06 12 34 56 78 or +33 6 12 34 56 78');
+    const template = (await this.twilio.approvedTemplates()).find((t) => t.sid === input.contentSid);
+    if (!template) throw new BadRequestException('Choose an approved WhatsApp template');
+    for (const v of template.variables) {
+      const src = input.variables?.[String(v.number)];
+      if (!src || (src.source === 'text' && !String(src.value || '').trim())) throw new BadRequestException(`Fill in {{${v.number}}} first`);
+    }
+    const { rows: lead } = await this.pool.query(
+      `SELECT id, customer_name, destination FROM leads WHERE is_deleted = false
+          AND right(regexp_replace(COALESCE(NULLIF(whatsapp_number, ''), phone, ''), '[^0-9]', '', 'g'), 9) = $1 ORDER BY created_at DESC LIMIT 1`, [phone.slice(-9)]);
+    const vars = this.resolveVariables(input.variables, lead[0]?.customer_name || '', lead[0]?.destination || '');
+    let sid: string;
+    try {
+      sid = await this.twilio.sendContent(phone, template.sid, vars);
+    } catch (e: any) {
+      throw new BadRequestException(String(e.message || e));
+    }
+    const text = String(template.body || template.name).replace(/\{\{(\d+)\}\}/g, (_m: string, k: string) => vars[k] ?? '');
+    await this.pool.query(
+      `INSERT INTO whatsapp_messages (phone_number, lead_id, direction, msg_type, body, wa_message_id, meta) VALUES ($1, $2, 'out', 'text', $3, $4, $5)`,
+      [phone, lead[0]?.id ?? null, text, sid, JSON.stringify({ waId: sid, template: template.name, test: true })],
+    ).catch(() => undefined);
+    return { sid, to: phone, leadId: lead[0]?.id ?? null };
+  }
+
+  async testStatus(sid: string) {
+    this.assertTwilio();
+    if (!/^(SM|MM)[0-9a-f]{32}$/i.test(sid)) throw new BadRequestException('Unknown message');
+    return this.twilio.messageStatus(sid).catch((e) => { throw new BadRequestException(String(e.message || e)); });
   }
 
   async filters() {
@@ -254,16 +403,7 @@ export class BroadcastsService implements OnModuleInit {
       return;
     }
     const { rows: lead } = r.lead_id ? await this.pool.query(`SELECT customer_name, destination FROM leads WHERE id = $1`, [r.lead_id]) : { rows: [] as any[] };
-    const firstName = String(lead[0]?.customer_name || r.name || '').trim();
-    // A lead saved under its phone number, or as ".", has no real name to greet.
-    const name = /\p{L}/u.test(firstName) ? firstName.slice(0, 60) : 'there';
-    const destination = String(lead[0]?.destination || '').trim();
-    const vars: Record<string, string> = {};
-    for (const [n, src] of Object.entries((b.variables || {}) as Record<string, VariableSource>)) {
-      vars[n] = src.source === 'name' ? name
-        : src.source === 'destination' ? (destination && !/to be confirmed/i.test(destination) ? destination : 'your next trip')
-        : String(src.value || '').trim() || '-';
-    }
+    const vars = this.resolveVariables(b.variables, lead[0]?.customer_name || r.name || '', lead[0]?.destination || '');
     try {
       const sid = await this.twilio.sendContent(r.phone, b.content_sid, vars);
       await this.pool.query(`UPDATE whatsapp_broadcast_recipients SET status = 'sent', message_sid = $2, sent_at = now(), error = NULL, updated_at = now() WHERE id = $1`, [r.id, sid]);

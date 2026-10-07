@@ -17,6 +17,7 @@ import { LeadInput } from '@/types/lead';
 import { useAuthStore } from '@/store/auth-store';
 import { DESTINATIONS } from '@/lib/destinations';
 import { PHONE_COUNTRIES, phoneWithCountry } from '@/lib/utils';
+import { CountryCode } from '@/components/shared/country-code';
 
 const TRAVEL_TYPES = [
   { value: 'Couple', icon: Heart, tone: 'bg-rose-100 text-rose-600' },
@@ -62,16 +63,6 @@ function FieldLabel({ icon: Icon, children, required }: { icon: LucideIcon; chil
   );
 }
 
-// The country a phone number belongs to. The chosen one reads short ("FR +33") so it fits beside
-// the number; the others are listed by name.
-function CountryCode({ value, onChange }: { value: string; onChange: (code: string) => void }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Country code"
-      className="h-10 w-[5.75rem] shrink-0 rounded-lg border border-input bg-muted/50 px-1.5 text-xs font-semibold text-foreground">
-      {PHONE_COUNTRIES.map((c) => <option key={c.iso} value={c.code}>{c.code === value ? `${c.iso} +${c.code}` : `${c.name} (+${c.code})`}</option>)}
-    </select>
-  );
-}
 
 function Stepper({ value, onChange, min = 0 }: { value: number; onChange: (v: number) => void; min?: number }) {
   return (
