@@ -156,7 +156,7 @@ export class MetaController {
     res.status(200).send('EVENT_RECEIVED');
     Promise.allSettled([
       this.metaService.processWebhookPayload(req.body),
-      this.whatsappBot.processWebhookPayload(req.body),
+      this.whatsappBot.processMetaWebhook(req.body),
     ]).then((results) => {
       for (const result of results) {
         if (result.status === 'rejected') {

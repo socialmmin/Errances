@@ -1,7 +1,8 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../../common/db/pool.module';
-import { TwilioWhatsAppService } from '../integrations/whatsapp/twilio-whatsapp.service';
+import { ApprovedTemplate, TwilioWhatsAppService } from '../integrations/whatsapp/twilio-whatsapp.service';
+import { MetaWhatsAppService } from '../integrations/whatsapp/meta-whatsapp.service';
 import { waNumber } from '../integrations/whatsapp/whatsapp-bot.service';
 import { R2Service } from '../../common/r2/r2.service';
 
@@ -35,7 +36,7 @@ export interface NewTemplate {
 // Meta's charge per template message by the recipient's country code, in USD (approximate,
 // from Meta's 2025 rate card -- for a cost preview only; Twilio's bill is the real figure).
 const META_RATES: Record<'MARKETING' | 'UTILITY', Record<string, number>> = {
-  MARKETING: { '33': 0.0859, '91': 0.0118, '1': 0.025, '44': 0.0529, '49': 0.1365, '34': 0.0615, '39': 0.0691, '32': 0.0703, '41': 0.0703, '971': 0.0384, default: 0.0604 },
+  MARKETING: { '33': 0.1432, '91': 0.0118, '1': 0.025, '44': 0.0529, '49': 0.1365, '34': 0.0615, '39': 0.0691, '32': 0.0703, '41': 0.0703, '971': 0.0384, default: 0.0604 },
   UTILITY: { '33': 0.03, '91': 0.0014, '1': 0.004, '44': 0.022, '49': 0.0456, '34': 0.02, '39': 0.03, '32': 0.0283, '41': 0.0283, '971': 0.0157, default: 0.0113 },
 };
 const TWILIO_FEE = 0.005;
@@ -49,13 +50,14 @@ function metaRate(category: string, phone: string) {
 
 // Bulk WhatsApp: one approved template to a filtered list of leads. Sends go out a few per second
 // in the background, stop at WhatsApp's 24-hour customer limit and carry on when it frees up, and
-// never reach anyone who replied STOP. Delivery status comes back through Twilio's status webhook.
+// never reach anyone who replied STOP. Works through whichever provider is switched on (Twilio or
+// Meta's Cloud API); delivery status comes back through that provider's webhook.
 @Injectable()
 export class BroadcastsService implements OnModuleInit {
   private logger = new Logger('Broadcasts');
   private ticking = false;
 
-  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService, private r2: R2Service) {}
+  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService, private meta: MetaWhatsAppService, private r2: R2Service) {}
 
   onModuleInit() {
     setInterval(() => {
@@ -65,26 +67,55 @@ export class BroadcastsService implements OnModuleInit {
     }, 3000);
   }
 
-  private assertTwilio() {
-    if (!this.twilio.isConfigured()) throw new BadRequestException('Bulk WhatsApp needs the Twilio WhatsApp sender to be configured');
+  private provider() { return this.twilio.activeProvider(); }
+
+  private async assertReady() {
+    if (this.provider() === 'meta' && !(await this.meta.connection())) throw new BadRequestException('WhatsApp is not connected yet (Settings > WhatsApp)');
+  }
+
+  private async allTemplates(): Promise<ApprovedTemplate[]> {
+    try {
+      return this.provider() === 'twilio' ? await this.twilio.listTemplates() : await this.meta.listTemplates();
+    } catch (e: any) {
+      throw new BadRequestException(`Could not read the WhatsApp templates: ${e.message}`);
+    }
+  }
+
+  private async approvedTemplates() {
+    return (await this.allTemplates()).filter((t) => t.status === 'APPROVED');
+  }
+
+  // Sends one approved template through the active provider and returns the message id its
+  // delivery receipts will carry. `vars` are the values for {{1}}, {{2}}... by number.
+  private async deliver(t: { sid: string; name: string; language: string | null }, phone: string, vars: Record<string, string>): Promise<string> {
+    if (this.provider() === 'twilio') return this.twilio.sendContent(phone, t.sid, vars);
+    // Meta wants the image or PDF above the message sent again each time; it is the file the
+    // template was written with on this page.
+    const { rows } = await this.pool.query(`SELECT header_format, header_object_key, header_filename FROM meta_templates_local WHERE name = $1 ORDER BY (language = $2) DESC LIMIT 1`, [t.name, t.language]);
+    const file = rows[0]?.header_object_key ? rows[0] : null;
+    const header = file ? { format: String(file.header_format), filename: String(file.header_filename), link: this.twilio.mediaUrl(await this.twilio.mediaLink({ objectKey: file.header_object_key }, file.header_filename)) } : undefined;
+    const values = Object.keys(vars).map(Number).sort((a, b) => a - b).map((n) => vars[String(n)]);
+    return this.meta.sendTemplate(phone, { name: t.name, language: t.language || 'en_US' }, values, header);
   }
 
   // Every template submitted to WhatsApp with its approval state; the ones written on this page
   // (and so safe to delete here) are marked.
   async templates() {
-    this.assertTwilio();
+    await this.assertReady();
     const [all, { rows }] = await Promise.all([
-      this.twilio.listTemplates(),
-      this.pool.query(`SELECT content_sid FROM twilio_contents WHERE meta->>'origin' = 'bulk'`),
+      this.allTemplates(),
+      this.provider() === 'twilio'
+        ? this.pool.query(`SELECT content_sid AS id FROM twilio_contents WHERE meta->>'origin' = 'bulk'`)
+        : this.pool.query(`SELECT template_id AS id FROM meta_templates_local WHERE template_id IS NOT NULL`),
     ]);
-    const mine = new Set(rows.map((r) => r.content_sid));
+    const mine = new Set(rows.map((r) => r.id));
     return all.map((t) => ({ ...t, createdHere: mine.has(t.sid) }));
   }
 
   // Checks a template the way WhatsApp will, so mistakes are explained here and not by a
-  // rejection hours later; then creates it in Twilio and submits it for approval.
+  // rejection hours later; then creates it with the active provider, which submits it for approval.
   async createTemplate(input: NewTemplate) {
-    this.assertTwilio();
+    await this.assertReady();
     const name = String(input?.name || '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
     if (!name) throw new BadRequestException('Give the template a name');
     const category = input.category === 'UTILITY' ? 'UTILITY' : 'MARKETING';
@@ -120,27 +151,39 @@ export class BroadcastsService implements OnModuleInit {
     });
 
     const components: any[] = [];
+    let header: { objectKey: string; filename: string; format: string } | null = null;
     if (input.headerObjectKey) {
       const file = await this.r2.getObject(input.headerObjectKey);
       if (!file) throw new BadRequestException('The uploaded image or document could not be found -- upload it again');
       const isImage = /^image\/(jpeg|png)$/.test(file.contentType);
       if (!isImage && file.contentType !== 'application/pdf') throw new BadRequestException('The header must be a JPG or PNG image, or a PDF');
       if (file.body.length > (isImage ? 5 : 16) * 1024 * 1024) throw new BadRequestException(isImage ? 'The image must be under 5 MB' : 'The PDF must be under 16 MB');
-      components.push({ type: 'HEADER', format: isImage ? 'IMAGE' : 'DOCUMENT', example: { header_handle: [`twsample:${input.headerObjectKey}`], file_name: String(input.headerFileName || '').trim() || undefined } });
+      header = { objectKey: input.headerObjectKey, filename: String(input.headerFileName || '').trim() || (isImage ? 'image.jpg' : 'document.pdf'), format: isImage ? 'IMAGE' : 'DOCUMENT' };
     }
     components.push({ type: 'BODY', text: body, ...(samples.length ? { example: { body_text: [samples] } } : {}) });
     if (footer) components.push({ type: 'FOOTER', text: footer });
     if (metaButtons.length) components.push({ type: 'BUTTONS', buttons: metaButtons });
 
-    const existing = await this.twilio.listTemplates();
+    const existing = await this.allTemplates();
     if (existing.some((t) => t.name === name)) throw new BadRequestException(`A template called "${name}" already exists -- choose another name`);
+    const language = input.language === 'fr' ? 'fr' : 'en_US';
     let created: { id: string; status: string };
     try {
-      created = await this.twilio.createTemplate({ name, language: input.language === 'fr' ? 'fr' : 'en_US', category, components });
+      if (this.provider() === 'twilio') {
+        // Twilio takes the sample file as part of the template definition.
+        const withHeader = header ? [{ type: 'HEADER', format: header.format, example: { header_handle: [`twsample:${header.objectKey}`], file_name: header.filename } }, ...components] : components;
+        created = await this.twilio.createTemplate({ name, language, category, components: withHeader });
+        await this.pool.query(`UPDATE twilio_contents SET meta = COALESCE(meta, '{}'::jsonb) || '{"origin":"bulk"}'::jsonb WHERE content_sid = $1`, [created.id]);
+      } else {
+        created = await this.meta.createTemplate({ name, language, category, components }, header ?? undefined);
+        await this.pool.query(
+          `INSERT INTO meta_templates_local (name, language, template_id, header_format, header_object_key, header_filename) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (name, language) DO UPDATE SET template_id = $3, header_format = $4, header_object_key = $5, header_filename = $6, created_at = now()`,
+          [name, language, created.id, header?.format ?? null, header?.objectKey ?? null, header?.filename ?? null]);
+      }
     } catch (e: any) {
       throw new BadRequestException(String(e.message || e));
     }
-    await this.pool.query(`UPDATE twilio_contents SET meta = COALESCE(meta, '{}'::jsonb) || '{"origin":"bulk"}'::jsonb WHERE content_sid = $1`, [created.id]);
     this.logger.log(`Template ${name} written on the Bulk WhatsApp page and submitted (${created.id})`);
     return { sid: created.id, name, status: created.status };
   }
@@ -148,12 +191,20 @@ export class BroadcastsService implements OnModuleInit {
   // Only templates written on this page: the itinerary, payment and report templates belong to
   // their own screens, and deleting one of those here would break what sends it.
   async deleteTemplate(sid: string) {
-    this.assertTwilio();
-    const { rows } = await this.pool.query(`SELECT name FROM twilio_contents WHERE content_sid = $1 AND meta->>'origin' = 'bulk'`, [sid]);
+    await this.assertReady();
+    const twilio = this.provider() === 'twilio';
+    const { rows } = twilio
+      ? await this.pool.query(`SELECT name FROM twilio_contents WHERE content_sid = $1 AND meta->>'origin' = 'bulk'`, [sid])
+      : await this.pool.query(`SELECT name FROM meta_templates_local WHERE template_id = $1`, [sid]);
     if (!rows[0]) throw new BadRequestException('Only templates created on this page can be deleted here');
     const { rows: busy } = await this.pool.query(`SELECT 1 FROM whatsapp_broadcasts WHERE content_sid = $1 AND status IN ('sending', 'waiting', 'paused') LIMIT 1`, [sid]);
     if (busy.length) throw new BadRequestException('A bulk send is still using this template -- cancel it or let it finish first');
-    await this.twilio.deleteTemplate(rows[0].name);
+    try {
+      if (twilio) await this.twilio.deleteTemplate(rows[0].name);
+      else { await this.meta.deleteTemplate(rows[0].name); await this.pool.query(`DELETE FROM meta_templates_local WHERE template_id = $1`, [sid]); }
+    } catch (e: any) {
+      throw new BadRequestException(String(e.message || e));
+    }
     return { ok: true };
   }
 
@@ -175,10 +226,10 @@ export class BroadcastsService implements OnModuleInit {
   // send. If the number belongs to a lead, that lead's name and destination fill the blanks and
   // the message is kept in their chat.
   async testSend(input: { contentSid: string; variables: Record<string, VariableSource>; phone: string }) {
-    this.assertTwilio();
+    await this.assertReady();
     const phone = waNumber(input?.phone);
     if (!phone) throw new BadRequestException('Enter a valid WhatsApp number, for example 06 12 34 56 78 or +33 6 12 34 56 78');
-    const template = (await this.twilio.approvedTemplates()).find((t) => t.sid === input.contentSid);
+    const template = (await this.approvedTemplates()).find((t) => t.sid === input.contentSid);
     if (!template) throw new BadRequestException('Choose an approved WhatsApp template');
     for (const v of template.variables) {
       const src = input.variables?.[String(v.number)];
@@ -190,7 +241,7 @@ export class BroadcastsService implements OnModuleInit {
     const vars = this.resolveVariables(input.variables, lead[0]?.customer_name || '', lead[0]?.destination || '');
     let sid: string;
     try {
-      sid = await this.twilio.sendContent(phone, template.sid, vars);
+      sid = await this.deliver(template, phone, vars);
     } catch (e: any) {
       throw new BadRequestException(String(e.message || e));
     }
@@ -203,9 +254,11 @@ export class BroadcastsService implements OnModuleInit {
   }
 
   async testStatus(sid: string) {
-    this.assertTwilio();
-    if (!/^(SM|MM)[0-9a-f]{32}$/i.test(sid)) throw new BadRequestException('Unknown message');
-    return this.twilio.messageStatus(sid).catch((e) => { throw new BadRequestException(String(e.message || e)); });
+    if (/^(SM|MM)[0-9a-f]{32}$/i.test(sid)) return this.twilio.messageStatus(sid).catch((e) => { throw new BadRequestException(String(e.message || e)); });
+    // Through Meta the state arrives on the webhook and is kept with the message.
+    const { rows } = await this.pool.query(`SELECT meta->>'status' AS status, meta->>'error' AS error FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1`, [sid]);
+    if (!rows[0]) throw new BadRequestException('Unknown message');
+    return { status: rows[0].status || 'sent', error: rows[0].error || null };
   }
 
   async filters() {
@@ -251,36 +304,45 @@ export class BroadcastsService implements OnModuleInit {
   }
 
   private async dailyLimit() {
-    const health = await this.twilio.health().catch(() => null);
-    const m = /(\d[\d,]*)/.exec(String(health?.throughput || ''));
-    const limit = m ? Number(m[1].replace(/,/g, '')) : /unlimited/i.test(String(health?.throughput || '')) ? null : 250;
+    let limit: number | null;
+    if (this.provider() === 'twilio') {
+      const health = await this.twilio.health().catch(() => null);
+      const m = /(\d[\d,]*)/.exec(String(health?.throughput || ''));
+      limit = m ? Number(m[1].replace(/,/g, '')) : /unlimited/i.test(String(health?.throughput || '')) ? null : 250;
+    } else {
+      const status = await this.meta.status().catch(() => null);
+      limit = status ? status.dailyLimit : 250;
+    }
     const { rows } = await this.pool.query(
       `SELECT count(DISTINCT phone)::int AS n FROM whatsapp_broadcast_recipients WHERE sent_at > now() - interval '24 hours' AND status <> 'failed'`);
     return { limit, usedLast24h: rows[0].n as number };
   }
 
   async preview(input: { audience: Audience; contentSid?: string }) {
-    this.assertTwilio();
+    await this.assertReady();
+    const twilio = this.provider() === 'twilio';
     const found = await this.audience(input.audience || {});
-    const template = input.contentSid ? (await this.twilio.approvedTemplates()).find((t) => t.sid === input.contentSid) : null;
+    const template = input.contentSid ? (await this.approvedTemplates().catch(() => [])).find((t) => t.sid === input.contentSid) : null;
     const category = template?.category || 'MARKETING';
-    const cost = found.recipients.reduce((sum, r) => sum + metaRate(category, r.phone) + TWILIO_FEE, 0);
-    const billing = await this.twilio.billing().catch(() => null);
+    const cost = found.recipients.reduce((sum, r) => sum + metaRate(category, r.phone) + (twilio ? TWILIO_FEE : 0), 0);
+    // Twilio is prepaid (a balance that can run out); Meta bills the payment method on the account.
+    const billing = twilio ? await this.twilio.billing().catch(() => null) : null;
     const { limit, usedLast24h } = await this.dailyLimit();
     return {
       count: found.recipients.length, matched: found.matched, invalid: found.invalid, optedOut: found.stopped, duplicates: found.duplicate,
       sample: found.recipients.slice(0, 8).map((r) => ({ name: r.name, phone: r.phone, destination: r.destination })),
       estimate: { currency: 'USD', total: Math.round(cost * 100) / 100, category },
       balance: billing ? { amount: billing.balance, currency: billing.currency } : null,
-      dailyLimit: limit, usedLast24h,
+      dailyLimit: limit, usedLast24h, provider: this.provider(),
     };
   }
 
   async create(input: { name: string; contentSid: string; variables: Record<string, VariableSource>; audience: Audience }, userId: string | null) {
-    this.assertTwilio();
+    await this.assertReady();
+    const twilio = this.provider() === 'twilio';
     const name = String(input.name || '').trim();
     if (!name) throw new BadRequestException('Give this bulk send a name');
-    const template = (await this.twilio.approvedTemplates()).find((t) => t.sid === input.contentSid);
+    const template = (await this.approvedTemplates()).find((t) => t.sid === input.contentSid);
     if (!template) throw new BadRequestException('Choose an approved WhatsApp template');
     for (const v of template.variables) {
       const src = input.variables?.[String(v.number)];
@@ -289,14 +351,14 @@ export class BroadcastsService implements OnModuleInit {
     }
     const found = await this.audience(input.audience || {});
     if (!found.recipients.length) throw new BadRequestException('No one to send to with these filters');
-    const cost = found.recipients.reduce((sum, r) => sum + metaRate(template.category, r.phone) + TWILIO_FEE, 0);
+    const cost = found.recipients.reduce((sum, r) => sum + metaRate(template.category, r.phone) + (twilio ? TWILIO_FEE : 0), 0);
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        `INSERT INTO whatsapp_broadcasts (name, content_sid, template_name, template_body, variables, audience, status, total, estimated_cost, currency, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7, $8, 'USD', $9) RETURNING id`,
-        [name, template.sid, template.name, template.body, JSON.stringify(input.variables), JSON.stringify(input.audience || {}), found.recipients.length, Math.round(cost * 100) / 100, userId],
+        `INSERT INTO whatsapp_broadcasts (name, content_sid, template_name, template_body, variables, audience, status, total, estimated_cost, currency, created_by, provider, template_language)
+         VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7, $8, 'USD', $9, $10, $11) RETURNING id`,
+        [name, template.sid, template.name, template.body, JSON.stringify(input.variables), JSON.stringify(input.audience || {}), found.recipients.length, Math.round(cost * 100) / 100, userId, this.provider(), template.language],
       );
       const id = rows[0].id;
       for (let i = 0; i < found.recipients.length; i += 500) {
@@ -361,8 +423,8 @@ export class BroadcastsService implements OnModuleInit {
   // ---------------------------------------------------------------- sender
 
   private async tick() {
-    if (!this.twilio.isConfigured()) return;
-    const { rows: active } = await this.pool.query(`SELECT * FROM whatsapp_broadcasts WHERE status IN ('sending', 'waiting') ORDER BY created_at LIMIT 1`);
+    // A bulk send goes out only through the provider it was started with (its template lives there).
+    const { rows: active } = await this.pool.query(`SELECT * FROM whatsapp_broadcasts WHERE status IN ('sending', 'waiting') AND provider = $1 ORDER BY created_at LIMIT 1`, [this.provider()]);
     const b = active[0];
     if (!b) return;
     const { limit, usedLast24h } = await this.dailyLimit();
@@ -405,7 +467,7 @@ export class BroadcastsService implements OnModuleInit {
     const { rows: lead } = r.lead_id ? await this.pool.query(`SELECT customer_name, destination FROM leads WHERE id = $1`, [r.lead_id]) : { rows: [] as any[] };
     const vars = this.resolveVariables(b.variables, lead[0]?.customer_name || r.name || '', lead[0]?.destination || '');
     try {
-      const sid = await this.twilio.sendContent(r.phone, b.content_sid, vars);
+      const sid = await this.deliver({ sid: b.content_sid, name: b.template_name, language: b.template_language }, r.phone, vars);
       await this.pool.query(`UPDATE whatsapp_broadcast_recipients SET status = 'sent', message_sid = $2, sent_at = now(), error = NULL, updated_at = now() WHERE id = $1`, [r.id, sid]);
       const text = String(b.template_body || b.template_name).replace(/\{\{(\d+)\}\}/g, (_m: string, k: string) => vars[k] ?? '');
       await this.pool.query(

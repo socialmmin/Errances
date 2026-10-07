@@ -137,7 +137,7 @@ export class FinanceService implements OnModuleInit {
   }
 
   private async whatsappConfig() {
-    if (this.twilio.isConfigured()) return { phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token_encrypted: TWILIO_PSEUDO_ID };
+    if (this.twilio.isActive()) return { phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token_encrypted: TWILIO_PSEUDO_ID };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`);
     const cfg = rows[0];

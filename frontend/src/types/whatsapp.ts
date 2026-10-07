@@ -29,8 +29,8 @@ export interface WhatsAppConfig {
   business_account_id: string | null;
   is_configured: boolean;
   configured_at: string | null;
-  // Set when WhatsApp runs through Twilio (configured on the server, not on this screen).
-  provider?: 'twilio';
+  // Which way WhatsApp runs: through Twilio, or through Meta's own Cloud API.
+  provider?: 'twilio' | 'meta';
   sender?: string;
 }
 

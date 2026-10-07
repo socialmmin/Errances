@@ -713,23 +713,32 @@ export class WhatsAppBotService implements OnModuleInit {
         const { rows } = await this.pool.query(`SELECT 1 FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1`, [sid]);
         if (rows.length) return;
       }
-      await this.processWebhookPayload(this.twilio.toCloudInbound(params));
+      // While Meta is the provider a message should not arrive through Twilio at all. If one does
+      // (the number is still hosted there), it is kept in the Inbox and staff are notified, but
+      // the bot does not answer it: its reply would go out through the other channel.
+      const active = this.twilio.isActive();
+      if (!active) this.logger.warn(`WhatsApp message from ${params?.WaId || params?.From} arrived through Twilio while Meta is the provider -- stored, not answered`);
+      await this.processWebhookPayload(this.twilio.toCloudInbound(params, active ? {} : { recovered: true }));
     } finally {
       if (sid) this.twilioInFlight.delete(sid);
     }
   }
 
+  // Events from Meta's webhook (messages, delivery receipts, template decisions). Used only while
+  // Meta is the provider: with Twilio on, the same customer message would otherwise be handled
+  // twice, once from each side.
+  async processMetaWebhook(body: any): Promise<void> {
+    if (this.twilio.isActive()) {
+      const hasWhatsApp = (body?.entry ?? []).some((e: any) => (e?.changes ?? []).some((c: any) => ['messages', 'message_template_status_update', 'smb_message_echoes'].includes(c?.field)));
+      if (hasWhatsApp) this.logger.warn('WhatsApp event from Meta ignored: Twilio is the provider (Settings > WhatsApp)');
+      return;
+    }
+    await this.processWebhookPayload(body);
+  }
+
   async processTwilioStatus(params: Record<string, string>): Promise<void> {
     const payload = this.twilio.toCloudStatus(params);
-    if (!payload) return;
-    // A bulk WhatsApp recipient's delivery state (never moved backwards by a late event).
-    const status = payload.entry[0].changes[0].value.statuses[0];
-    await this.pool.query(
-      `UPDATE whatsapp_broadcast_recipients SET status = $2, error = $3, updated_at = now()
-        WHERE message_sid = $1 AND (CASE status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 WHEN 'failed' THEN 4 ELSE 0 END) <= $4`,
-      [status.id, status.status, status.errors?.[0]?.title ?? null, ({ sent: 1, delivered: 2, read: 3, failed: 4 } as Record<string, number>)[status.status] ?? 0],
-    ).catch(() => undefined);
-    await this.processWebhookPayload(payload);
+    if (payload) await this.processWebhookPayload(payload);
   }
 
   // Customer messages Twilio received while the CRM could not take them (e.g. its webhook address
@@ -815,6 +824,12 @@ export class WhatsAppBotService implements OnModuleInit {
                 `UPDATE whatsapp_messages SET meta = COALESCE(meta,'{}'::jsonb) || jsonb_build_object('status', $2::text, 'error', $3::text, 'statusAt', now())
                  WHERE wa_message_id = $1
                    AND COALESCE((CASE meta->>'status' WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 WHEN 'accepted' THEN 1 WHEN 'failed' THEN 4 ELSE 0 END), 0) <= $4`,
+                [delivery.id, delivery.status, errorMessage, rank],
+              ).catch(() => undefined);
+              // The same for a bulk WhatsApp recipient (whichever provider sent it).
+              await this.pool.query(
+                `UPDATE whatsapp_broadcast_recipients SET status = $2, error = $3, updated_at = now()
+                  WHERE message_sid = $1 AND (CASE status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 WHEN 'failed' THEN 4 ELSE 0 END) <= $4`,
                 [delivery.id, delivery.status, errorMessage, rank],
               ).catch(() => undefined);
             }
@@ -2712,7 +2727,7 @@ export class WhatsAppBotService implements OnModuleInit {
 
   private async getConfig(): Promise<WhatsAppConfig | null> {
     // Twilio takes over WhatsApp whenever its settings are present.
-    if (this.twilio.isConfigured()) return { provider: 'twilio', phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token: TWILIO_PSEUDO_ID };
+    if (this.twilio.isActive()) return { provider: 'twilio', phone_number_id: TWILIO_PSEUDO_ID, business_account_id: TWILIO_PSEUDO_ID, access_token: TWILIO_PSEUDO_ID };
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, access_token_encrypted FROM whatsapp_config
        WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`,
@@ -2836,7 +2851,7 @@ export class WhatsAppBotService implements OnModuleInit {
     const now = Math.floor(Date.now() / 1000);
     const istNow = new Date((now + IST) * 1000);
     const monthStart = Math.floor(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), 1) / 1000) - IST;
-    const url = `https://graph.facebook.com/${version}/${config.business_account_id}?fields=pricing_analytics.start(${monthStart}).end(${now}).granularity(DAILY).dimensions(%5B%22PRICING_CATEGORY%22%5D)`;
+    const url = `https://graph.facebook.com/${version}/${config.business_account_id}?fields=currency,pricing_analytics.start(${monthStart}).end(${now}).granularity(DAILY).dimensions(%5B%22PRICING_CATEGORY%22%5D)`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${config.access_token}` } });
     const body: any = await res.json();
     if (!res.ok) throw new BadRequestException(body?.error?.error_user_msg || body?.error?.message || 'Could not read billing from Meta');
@@ -2853,8 +2868,9 @@ export class WhatsAppBotService implements OnModuleInit {
     const todayStart = Math.max(...Array.from(byDay.keys()), 0);
     const round = (n: number) => Math.round(n * 100) / 100;
     return {
-      currency: 'INR', monthStart: new Date(monthStart * 1000).toISOString(),
-      totalCost: round(totalCost), gstRate: 0.18, estimatedGst: round(totalCost * 0.18), estimatedTotal: round(totalCost * 1.18),
+      // Meta bills in the account's own currency; the 18% GST estimate only applies to rupee accounts.
+      provider: 'meta', currency: String(body?.currency || 'USD'), monthStart: new Date(monthStart * 1000).toISOString(),
+      totalCost: round(totalCost), gstRate: body?.currency === 'INR' ? 0.18 : 0, estimatedGst: body?.currency === 'INR' ? round(totalCost * 0.18) : 0, estimatedTotal: round(totalCost * (body?.currency === 'INR' ? 1.18 : 1)),
       todayCost: round(byDay.get(todayStart)?.cost ?? 0),
       byCategory: Array.from(byCategory.entries()).map(([category, v]) => ({ category, volume: v.volume, cost: round(v.cost) })),
       days: Array.from(byDay.entries()).sort((a, b) => b[0] - a[0]).map(([start, v]) => ({ date: new Date((start + IST) * 1000).toISOString().slice(0, 10), volume: v.volume, cost: round(v.cost) })),

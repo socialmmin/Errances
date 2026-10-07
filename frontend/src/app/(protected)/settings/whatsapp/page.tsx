@@ -1,8 +1,8 @@
 'use client';
 
-import { tr } from '@/i18n';
+import { WhatsAppProviderPanel } from '@/components/settings/whatsapp-provider-panel';
 import { useState } from 'react';
-import { Plus, Pencil, MessageSquare } from 'lucide-react';
+import { Plus, Pencil } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,14 +16,14 @@ import { PermissionGuard } from '@/components/shared/permission-guard';
 import { PERMISSIONS } from '@/lib/permissions';
 import {
   useWhatsAppTemplates, useCreateWhatsAppTemplate, useUpdateWhatsAppTemplate, useDeleteWhatsAppTemplate,
-  useWhatsAppLogs, useWhatsAppConfig, useSaveWhatsAppConfig,
+  useWhatsAppLogs,
 } from '@/hooks/use-whatsapp';
 import { WhatsAppTemplate, WHATSAPP_MERGE_VARIABLES } from '@/types/whatsapp';
 
 const TABS = [
   { id: 'templates', label: 'Templates' },
   { id: 'logs', label: 'Message Logs' },
-  { id: 'config', label: 'API Configuration' },
+  { id: 'config', label: 'Twilio / Meta connection' },
 ] as const;
 
 function TemplateDialog({ template, onClose }: { template: WhatsAppTemplate | 'new' | null; onClose: () => void }) {
@@ -180,56 +180,9 @@ function LogsTab() {
   );
 }
 
+// Which provider WhatsApp runs through (Twilio or Meta), with the switch and the Meta connection.
 function ConfigTab() {
-  const { data } = useWhatsAppConfig();
-  const save = useSaveWhatsAppConfig();
-  const { toast } = useToast();
-  const [phoneNumberId, setPhoneNumberId] = useState('');
-  const [accessToken, setAccessToken] = useState('');
-  const [businessAccountId, setBusinessAccountId] = useState('');
-
-  async function submit() {
-    await save.mutateAsync({ phoneNumberId, accessToken, businessAccountId: businessAccountId || undefined });
-    toast('Configuration saved', 'success');
-    setAccessToken('');
-  }
-
-  // Through Twilio the connection lives in the server's settings, not on this screen.
-  if (data?.provider === 'twilio') {
-    return (
-      <Card>
-        <CardContent className="max-w-md space-y-2 p-5">
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-gold" />
-            <p className="text-sm font-semibold">{tr('WhatsApp through Twilio')}</p>
-          </div>
-          <p className="text-sm">{tr('Connected. Messages are sent and received on {number}.', { number: data.sender ?? '' })}</p>
-          <p className="text-xs text-muted-foreground">{tr('The Twilio account and number are set on the server. Connection health is under Settings → Integrations.')}</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardContent className="max-w-md space-y-3 p-5">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-gold" />
-          <p className="text-sm font-semibold">WhatsApp Business API</p>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {data?.is_configured ? `Configured${data.configured_at ? ` on ${new Date(data.configured_at).toLocaleDateString('en-IN')}` : ''}.` : 'Not configured yet.'}
-          {' '}Credentials are stored securely and never displayed again once saved.
-        </p>
-        <div><Label>Phone Number ID *</Label><Input className="mt-1" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} placeholder={data?.phone_number_id ?? undefined} /></div>
-        <div><Label>Access Token *</Label><Input className="mt-1" type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} placeholder="••••••••••••" /></div>
-        <div><Label>Business Account ID</Label><Input className="mt-1" value={businessAccountId} onChange={(e) => setBusinessAccountId(e.target.value)} placeholder={data?.business_account_id ?? undefined} /></div>
-        <PermissionGuard permission={PERMISSIONS.SETTINGS_BRANCHES}>
-          <Button disabled={!phoneNumberId || !accessToken || save.isPending} onClick={submit}>Save &amp; Test Connection</Button>
-        </PermissionGuard>
-      </CardContent>
-    </Card>
-  );
+  return <WhatsAppProviderPanel />;
 }
 
 export default function SettingsWhatsAppPage() {

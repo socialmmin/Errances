@@ -49,11 +49,38 @@ export class TwilioWhatsAppService implements OnModuleInit {
 
   constructor(private config: ConfigService, @Inject(PG_POOL) private pool: Pool, private r2: R2Service) {}
 
+  // Which provider WhatsApp runs through: 'twilio' or 'meta' (Meta's own Cloud API), chosen in
+  // Settings > WhatsApp and kept in whatsapp_automation_settings. Held here in memory because
+  // every send asks; re-read every 15 seconds so a change made on one screen reaches everything.
+  private provider: 'twilio' | 'meta' = 'twilio';
+
   // Meta pushes template decisions by webhook; Twilio does not, so pending templates are checked
   // every 5 minutes and a decision is announced to the CRM the same way (see onTemplateStatus).
-  onModuleInit() {
-    if (!this.isConfigured()) return;
-    setInterval(() => this.checkPendingTemplates().catch((e) => this.logger.warn(`Template status check failed: ${e.message}`)), 5 * 60 * 1000);
+  async onModuleInit() {
+    await this.loadProvider();
+    setInterval(() => this.loadProvider(), 15 * 1000);
+    setInterval(() => { if (this.isActive()) this.checkPendingTemplates().catch((e) => this.logger.warn(`Template status check failed: ${e.message}`)); }, 5 * 60 * 1000);
+  }
+
+  private async loadProvider() {
+    const { rows } = await this.pool.query(`SELECT provider FROM whatsapp_automation_settings WHERE id = true`).catch(() => ({ rows: [] as any[] }));
+    const next = rows[0]?.provider === 'meta' ? 'meta' : 'twilio';
+    if (next !== this.provider) this.logger.log(`WhatsApp provider is now ${next}`);
+    this.provider = next;
+  }
+
+  // True while WhatsApp runs through Twilio: its settings are present and it is the chosen
+  // provider. Everything that decides "Twilio or Meta?" asks this, not isConfigured().
+  isActive() { return this.isConfigured() && this.provider === 'twilio'; }
+
+  // 'twilio' while it is active, otherwise Meta's Cloud API (also when Twilio is not set up).
+  activeProvider(): 'twilio' | 'meta' { return this.isActive() ? 'twilio' : 'meta'; }
+
+  async setProvider(provider: 'twilio' | 'meta', userId?: string | null) {
+    await this.pool.query(`UPDATE whatsapp_automation_settings SET provider = $1, updated_at = now(), updated_by = $2 WHERE id = true`, [provider, userId ?? null]);
+    this.provider = provider;
+    this.healthCache = { at: 0, value: null };
+    this.logger.log(`WhatsApp provider switched to ${provider}`);
   }
 
   onTemplateStatus(listener: (e: TemplateStatusEvent) => void | Promise<void>) {

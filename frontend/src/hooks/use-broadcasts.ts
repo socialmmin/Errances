@@ -25,7 +25,7 @@ export interface BroadcastPreview {
   sample: { name: string; phone: string; destination: string }[];
   estimate: { currency: string; total: number; category: string };
   balance: { amount: number; currency: string } | null;
-  dailyLimit: number | null; usedLast24h: number;
+  dailyLimit: number | null; usedLast24h: number; provider: 'twilio' | 'meta';
 }
 export type BroadcastStatus = 'sending' | 'waiting' | 'paused' | 'done' | 'cancelled';
 export interface BroadcastRow {

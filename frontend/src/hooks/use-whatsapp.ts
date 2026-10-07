@@ -253,7 +253,7 @@ export function useRetryAllFailed() {
 }
 
 export interface WhatsAppBilling {
-  provider?: 'twilio'; balance?: number; currency: string; monthStart: string; totalCost: number; gstRate: number; estimatedGst: number; estimatedTotal: number; todayCost: number;
+  provider?: 'twilio' | 'meta'; balance?: number; currency: string; monthStart: string; totalCost: number; gstRate: number; estimatedGst: number; estimatedTotal: number; todayCost: number;
   byCategory: { category: string; volume: number; cost: number }[]; days: { date: string; volume: number; cost: number }[]; updatedAt: string;
 }
 
@@ -380,4 +380,31 @@ export function useToggleStar(leadId?: string | null) {
     mutationFn: (messageId: string) => api.post<{ starred: boolean }>(`/integrations/whatsapp/messages/${messageId}/star`, {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['whatsapp', 'messages', leadId] }),
   });
+}
+
+// ---- Twilio / Meta switch (Settings > WhatsApp) ----
+export interface WhatsAppProviders {
+  active: 'twilio' | 'meta';
+  twilio: { configured: boolean; sender: string | null; ready: boolean; senderStatus: string | null; name: string | null };
+  meta: {
+    configured: boolean; tokenValid: boolean; number: string | null; name: string | null; quality: string | null; dailyLimit: number | null;
+    canSend: boolean; sendProblem: string | null; warnings: string[]; webhookOk: boolean; hasAppSecret: boolean;
+    phoneNumberId: string | null; businessAccountId: string | null; ready: boolean; problems: string[];
+  };
+}
+
+// Asks Twilio and Meta live each time, so the screen shows what would really happen on a switch.
+export function useWhatsAppProviders() {
+  return useQuery({ queryKey: ['whatsapp', 'providers'], queryFn: () => api.get<WhatsAppProviders>('/whatsapp/providers'), staleTime: 30_000 });
+}
+
+export function useWhatsAppProviderActions() {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: ['whatsapp'] });
+  const switchTo = useMutation({ mutationFn: (provider: 'twilio' | 'meta') => api.post<WhatsAppProviders>('/whatsapp/provider', { provider }), onSuccess: refresh });
+  const saveMeta = useMutation({
+    mutationFn: (input: { phoneNumberId: string; businessAccountId: string; accessToken: string; appSecret?: string }) => api.post<{ number: string; name: string | null }>('/whatsapp/meta-connection', input),
+    onSuccess: refresh,
+  });
+  return { switchTo, saveMeta };
 }

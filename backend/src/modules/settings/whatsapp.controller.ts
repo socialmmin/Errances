@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../../common/db/pool.module';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -9,6 +9,7 @@ import { CreateWhatsAppTemplateDto } from './dto/create-whatsapp-template.dto';
 import { UpdateWhatsAppTemplateDto } from './dto/update-whatsapp-template.dto';
 import { SaveWhatsAppConfigDto } from './dto/save-whatsapp-config.dto';
 import { TwilioWhatsAppService } from '../integrations/whatsapp/twilio-whatsapp.service';
+import { MetaWhatsAppService } from '../integrations/whatsapp/meta-whatsapp.service';
 
 // Templates + message logs + a write-only API config placeholder for the
 // Settings > WhatsApp module, ported from hala-audit's whatsapp.tsx.
@@ -17,7 +18,7 @@ import { TwilioWhatsAppService } from '../integrations/whatsapp/twilio-whatsapp.
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('whatsapp')
 export class WhatsAppController {
-  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService) {}
+  constructor(@Inject(PG_POOL) private pool: Pool, private twilio: TwilioWhatsAppService, private meta: MetaWhatsAppService) {}
 
   @Get('templates')
   @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
@@ -166,14 +167,69 @@ export class WhatsAppController {
   // Any signed-in user: the Inbox enables its Send button from this, and it holds nothing secret.
   @Get('config')
   async getConfig() {
-    if (this.twilio.isConfigured()) {
+    if (this.twilio.isActive()) {
       return { provider: 'twilio', sender: this.twilio.from.replace('whatsapp:', ''), phone_number_id: null, business_account_id: null, is_configured: true, configured_at: null };
     }
     const { rows } = await this.pool.query(
       `SELECT phone_number_id, business_account_id, is_configured, configured_at FROM whatsapp_config ORDER BY created_at DESC LIMIT 1`,
     );
     // Never returns access_token_encrypted -- write-only by design.
-    return rows[0] || { phone_number_id: null, business_account_id: null, is_configured: false, configured_at: null };
+    return { provider: 'meta', ...(rows[0] || { phone_number_id: null, business_account_id: null, is_configured: false, configured_at: null }) };
+  }
+
+  // Both ways WhatsApp can run, with a live check of each, for the switch in Settings > WhatsApp.
+  @Get('providers')
+  @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
+  async providers() {
+    const [health, meta, hasAppSecret, { rows }] = await Promise.all([
+      this.twilio.isConfigured() ? this.twilio.health().catch(() => null) : Promise.resolve(null),
+      this.meta.status(true).catch((e) => ({ configured: false, tokenValid: false, number: null, name: null, quality: null, dailyLimit: null, canSend: false, sendProblem: String(e.message), warnings: [], webhookOk: false })),
+      this.meta.hasAppSecret(),
+      this.pool.query(`SELECT phone_number_id, business_account_id FROM whatsapp_config WHERE is_configured = true ORDER BY created_at DESC LIMIT 1`),
+    ]);
+    return {
+      active: this.twilio.activeProvider(),
+      twilio: {
+        configured: this.twilio.isConfigured(), sender: this.twilio.isConfigured() ? this.twilio.from.replace('whatsapp:', '') : null,
+        ready: !!health?.tokenValid && health?.senderStatus === 'ONLINE', senderStatus: health?.senderStatus ?? null, name: health?.senderName ?? null,
+      },
+      meta: { ...meta, hasAppSecret, phoneNumberId: rows[0]?.phone_number_id ?? null, businessAccountId: rows[0]?.business_account_id ?? null, ready: this.metaProblems(meta, hasAppSecret).length === 0, problems: this.metaProblems(meta, hasAppSecret) },
+    };
+  }
+
+  // Everything that would make WhatsApp stop working if Meta were switched on now.
+  private metaProblems(meta: { configured: boolean; tokenValid: boolean; canSend: boolean; sendProblem: string | null; webhookOk: boolean }, hasAppSecret: boolean): string[] {
+    if (!meta.configured) return ['The Meta connection has not been saved yet.'];
+    const problems: string[] = [];
+    if (!meta.tokenValid || !meta.canSend) problems.push(meta.sendProblem || 'Meta does not let this app send from the number.');
+    if (!hasAppSecret) problems.push('The App Secret is missing, so incoming messages from Meta would be refused.');
+    if (meta.tokenValid && !meta.webhookOk) problems.push('The Meta app is not subscribed to this WhatsApp account, so customer messages would not arrive.');
+    return problems;
+  }
+
+  @Post('meta-connection')
+  @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
+  async saveMetaConnection(@Body() dto: { phoneNumberId: string; businessAccountId: string; accessToken: string; appSecret?: string }, @Req() req: any) {
+    try {
+      return await this.meta.saveConnection(dto, req.user?.userId ?? null);
+    } catch (e: any) {
+      throw new BadRequestException(String(e.message || e));
+    }
+  }
+
+  // Switches WhatsApp between Twilio and Meta. Refused when the one being switched to could not
+  // send or receive right now -- switching would silently stop every WhatsApp message.
+  @Post('provider')
+  @RequirePermissions(PERMISSIONS.SETTINGS_BRANCHES)
+  async setProvider(@Body('provider') provider: string, @Req() req: any) {
+    if (provider !== 'twilio' && provider !== 'meta') throw new BadRequestException('Choose Twilio or Meta');
+    const state = await this.providers();
+    if (provider === 'meta' && !state.meta.ready) throw new BadRequestException(`Meta is not ready, so WhatsApp was left on Twilio. ${state.meta.problems.join(' ')}`);
+    if (provider === 'twilio' && !state.twilio.ready) throw new BadRequestException(state.twilio.configured ? 'The Twilio sender is not online, so WhatsApp was left on Meta.' : 'Twilio is not set up on the server.');
+    await this.twilio.setProvider(provider, req.user?.userId ?? null);
+    // A bulk send belongs to the provider it started with; pause the other one's.
+    await this.pool.query(`UPDATE whatsapp_broadcasts SET status = 'paused' WHERE status IN ('sending', 'waiting') AND provider <> $1`, [provider]);
+    return this.providers();
   }
 
   @Post('config')
