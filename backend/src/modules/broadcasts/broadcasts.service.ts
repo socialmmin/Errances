@@ -255,8 +255,8 @@ export class BroadcastsService implements OnModuleInit {
     }
     const { rows: lead } = r.lead_id ? await this.pool.query(`SELECT customer_name, destination FROM leads WHERE id = $1`, [r.lead_id]) : { rows: [] as any[] };
     const firstName = String(lead[0]?.customer_name || r.name || '').trim();
-    // A lead saved under its phone number has no real name to greet.
-    const name = firstName && !/^\+?\d[\d\s]+$/.test(firstName) ? firstName.slice(0, 60) : 'there';
+    // A lead saved under its phone number, or as ".", has no real name to greet.
+    const name = /\p{L}/u.test(firstName) ? firstName.slice(0, 60) : 'there';
     const destination = String(lead[0]?.destination || '').trim();
     const vars: Record<string, string> = {};
     for (const [n, src] of Object.entries((b.variables || {}) as Record<string, VariableSource>)) {

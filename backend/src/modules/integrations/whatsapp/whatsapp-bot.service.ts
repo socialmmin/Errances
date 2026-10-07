@@ -2931,8 +2931,8 @@ export class WhatsAppBotService implements OnModuleInit {
     if (!lead) throw new BadRequestException('Lead not found');
     const phone = lead.whatsapp_number || lead.phone;
     if (!phone) throw new BadRequestException('This lead has no phone number');
-    // A lead saved under its phone number has no name to greet; "To be confirmed" is not a destination.
-    const name = /^\+?[\d\s]+$/.test(String(lead.customer_name || '').trim()) ? 'there' : lead.customer_name;
+    // A lead saved under its phone number (or as ".") has no name to greet; "To be confirmed" is not a destination.
+    const name = /\p{L}/u.test(String(lead.customer_name || '')) ? lead.customer_name : 'there';
     const destination = /^to be confirmed$/i.test(String(lead.destination || '').trim()) ? '' : lead.destination || '';
     return this.sendReopenTemplate(phone, name, destination, leadId);
   }

@@ -80,7 +80,11 @@ export default function BulkWhatsAppPage() {
   const filled = (template?.body ?? '').replace(/\{\{(\d+)\}\}/g, (_m, n: string) => {
     const v = variables[n];
     if (!v) return `{{${n}}}`;
-    return v.source === 'name' ? (preview.data?.sample[0]?.name || tr('Customer name')) : v.source === 'destination' ? (preview.data?.sample[0]?.destination || tr('Destination')) : (v.value || `{{${n}}}`);
+    // Same fallbacks the server uses when a lead has no real name or destination.
+    const first = preview.data?.sample[0];
+    if (v.source === 'name') return first ? (/\p{L}/u.test(first.name) ? first.name : 'there') : tr('Customer name');
+    if (v.source === 'destination') return first ? (first.destination && !/to be confirmed/i.test(first.destination) ? first.destination : 'your next trip') : tr('Destination');
+    return v.value || `{{${n}}}`;
   });
   const p = preview.data;
   const missingText = !!template && template.variables.some((v) => variables[String(v.number)]?.source === 'text' && !variables[String(v.number)]?.value?.trim());
