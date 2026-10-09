@@ -1592,10 +1592,15 @@ export class WhatsAppBotService implements OnModuleInit {
   // (set on the Bulk WhatsApp page), which then decides the questions.
   private async promoAnswered(from: string, message: any): Promise<{ service: EnquiryService; template: string | null } | null> {
     const repliedTo = String(message?.context?.id || '');
+    // The service sent with the promo, else the one its template has since been marked with (so a
+    // promo that went out before it was categorised still leads to the right questions).
     const { rows } = await this.pool.query(
-      `SELECT meta->>'service' AS service, meta->>'template' AS template FROM whatsapp_messages
-        WHERE phone_number = $1 AND direction = 'out' AND meta->>'service' IS NOT NULL
-          AND (wa_message_id = $2 OR created_at > now() - interval '7 days')
+      `SELECT service, template FROM (
+         SELECT COALESCE(m.meta->>'service', s.service) AS service, m.meta->>'template' AS template, m.wa_message_id, m.created_at
+           FROM whatsapp_messages m LEFT JOIN whatsapp_template_services s ON s.template_name = m.meta->>'template'
+          WHERE m.phone_number = $1 AND m.direction = 'out' AND (m.meta ? 'service' OR m.meta ? 'template')
+            AND (m.wa_message_id = $2 OR m.created_at > now() - interval '7 days')) x
+        WHERE service IS NOT NULL
         ORDER BY (wa_message_id = $2) DESC, created_at DESC LIMIT 1`, [from, repliedTo]);
     const service = rows[0]?.service;
     return ['ticket', 'visa', 'package', 'other'].includes(service) ? { service, template: rows[0].template ?? null } : null;
