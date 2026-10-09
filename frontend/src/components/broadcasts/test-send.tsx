@@ -8,11 +8,11 @@ import { useToast } from '@/components/ui/toast';
 import { CountryCode } from '@/components/shared/country-code';
 import { tr } from '@/i18n';
 import { PHONE_COUNTRIES, phoneWithCountry } from '@/lib/utils';
-import { BroadcastVariable, useTestSend, useTestStatus } from '@/hooks/use-broadcasts';
+import { BroadcastVariable, ServiceType, useTestSend, useTestStatus } from '@/hooks/use-broadcasts';
 
 // Sends the chosen template to one number typed in by hand, so it can be checked on a real phone
 // (any phone, not only a lead's) before it goes to everyone. Shows the message being delivered.
-export function TestSend({ contentSid, variables, ready }: { contentSid: string; variables: Record<string, BroadcastVariable>; ready: boolean }) {
+export function TestSend({ contentSid, variables, ready, service }: { contentSid: string; variables: Record<string, BroadcastVariable>; ready: boolean; service?: ServiceType }) {
   const { toast } = useToast();
   const send = useTestSend();
   const [country, setCountry] = useState('33');
@@ -24,7 +24,7 @@ export function TestSend({ contentSid, variables, ready }: { contentSid: string;
   async function go() {
     if (!full) return;
     try {
-      const res = await send.mutateAsync({ contentSid, variables, phone: full });
+      const res = await send.mutateAsync({ contentSid, variables, phone: full, service });
       setLast({ sid: res.sid, to: res.to });
     } catch (e: any) { toast(e.message || tr('Could not send the test'), 'error'); }
   }

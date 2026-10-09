@@ -15,8 +15,11 @@ export interface Audience {
   createdTo?: string;
   // Only leads who have written to us on WhatsApp at least once.
   onlyChatted?: boolean;
+  // What the lead asked for on WhatsApp: ticket | visa | package | other.
+  services?: string[];
 }
 // Where each template variable's value comes from, per recipient.
+const SERVICES = ['ticket', 'visa', 'package', 'other'];
 export type VariableSource = { source: 'name' | 'destination' | 'text'; value?: string };
 // A template written on the Bulk WhatsApp page, before it is submitted to WhatsApp.
 export interface NewTemplate {
@@ -31,6 +34,8 @@ export interface NewTemplate {
   // An uploaded image or PDF shown above the message.
   headerObjectKey?: string;
   headerFileName?: string;
+  // What the promo is about: decides the questions a customer answering it is asked.
+  service?: string;
 }
 
 // Meta's charge per template message by the recipient's country code, in USD (approximate,
@@ -109,7 +114,9 @@ export class BroadcastsService implements OnModuleInit {
         : this.pool.query(`SELECT template_id AS id FROM meta_templates_local WHERE template_id IS NOT NULL`),
     ]);
     const mine = new Set(rows.map((r) => r.id));
-    return all.map((t) => ({ ...t, createdHere: mine.has(t.sid) }));
+    const { rows: svc } = await this.pool.query(`SELECT template_name, service FROM whatsapp_template_services`);
+    const services = new Map(svc.map((r) => [r.template_name, r.service]));
+    return all.map((t) => ({ ...t, createdHere: mine.has(t.sid), service: services.get(t.name) ?? null }));
   }
 
   // Checks a template the way WhatsApp will, so mistakes are explained here and not by a
@@ -184,6 +191,7 @@ export class BroadcastsService implements OnModuleInit {
     } catch (e: any) {
       throw new BadRequestException(String(e.message || e));
     }
+    if (SERVICES.includes(String(input.service))) await this.setTemplateService(name, String(input.service));
     this.logger.log(`Template ${name} written on the Bulk WhatsApp page and submitted (${created.id})`);
     return { sid: created.id, name, status: created.status };
   }
@@ -208,6 +216,15 @@ export class BroadcastsService implements OnModuleInit {
     return { ok: true };
   }
 
+  // Remembers what a promo template is about, so the next send of it starts with that choice.
+  async setTemplateService(templateName: string, service: string) {
+    if (!SERVICES.includes(service)) throw new BadRequestException('Choose tickets, visa, package or other');
+    await this.pool.query(
+      `INSERT INTO whatsapp_template_services (template_name, service) VALUES ($1, $2) ON CONFLICT (template_name) DO UPDATE SET service = $2, updated_at = now()`,
+      [templateName, service]);
+    return { templateName, service };
+  }
+
   private resolveVariables(variables: Record<string, VariableSource>, customerName: string, leadDestination: string) {
     const first = String(customerName || '').trim();
     // A lead saved under its phone number, or as ".", has no real name to greet.
@@ -225,7 +242,7 @@ export class BroadcastsService implements OnModuleInit {
   // One message to one number typed in by hand, to see the template on a real phone before a bulk
   // send. If the number belongs to a lead, that lead's name and destination fill the blanks and
   // the message is kept in their chat.
-  async testSend(input: { contentSid: string; variables: Record<string, VariableSource>; phone: string }) {
+  async testSend(input: { contentSid: string; variables: Record<string, VariableSource>; phone: string; service?: string }) {
     await this.assertReady();
     const phone = waNumber(input?.phone);
     if (!phone) throw new BadRequestException('Enter a valid WhatsApp number, for example 06 12 34 56 78 or +33 6 12 34 56 78');
@@ -248,7 +265,7 @@ export class BroadcastsService implements OnModuleInit {
     const text = String(template.body || template.name).replace(/\{\{(\d+)\}\}/g, (_m: string, k: string) => vars[k] ?? '');
     await this.pool.query(
       `INSERT INTO whatsapp_messages (phone_number, lead_id, direction, msg_type, body, wa_message_id, meta) VALUES ($1, $2, 'out', 'text', $3, $4, $5)`,
-      [phone, lead[0]?.id ?? null, text, sid, JSON.stringify({ waId: sid, template: template.name, test: true })],
+      [phone, lead[0]?.id ?? null, text, sid, JSON.stringify({ waId: sid, template: template.name, test: true, ...(SERVICES.includes(String(input.service)) ? { service: input.service } : {}) })],
     ).catch(() => undefined);
     return { sid, to: phone, leadId: lead[0]?.id ?? null };
   }
@@ -267,7 +284,8 @@ export class BroadcastsService implements OnModuleInit {
       this.pool.query(`SELECT COALESCE(source::text, 'other') AS v, count(*)::int AS n FROM leads WHERE is_deleted = false GROUP BY 1 ORDER BY 2 DESC`),
       this.pool.query(`SELECT id, full_name FROM users WHERE is_active = true AND COALESCE(is_deleted, false) = false ORDER BY full_name`),
     ]);
-    return { statuses: statuses.rows, sources: sources.rows, users: users.rows };
+    const { rows: services } = await this.pool.query(`SELECT service_type AS v, count(*)::int AS n FROM leads WHERE is_deleted = false AND service_type IS NOT NULL GROUP BY 1 ORDER BY 2 DESC`);
+    return { statuses: statuses.rows, sources: sources.rows, users: users.rows, services };
   }
 
   // The leads a filter selects, one per WhatsApp number, without anyone who opted out.
@@ -283,6 +301,7 @@ export class BroadcastsService implements OnModuleInit {
     if (a.assignedTo?.length) add('l.assigned_to::text = ANY($?)', a.assignedTo);
     if (a.createdFrom) add('l.created_at >= $?::date', a.createdFrom);
     if (a.createdTo) add(`l.created_at < ($?::date + interval '1 day')`, a.createdTo);
+    if (a.services?.length) add('l.service_type = ANY($?)', a.services);
     if (a.onlyChatted) where.push(`EXISTS (SELECT 1 FROM whatsapp_messages m WHERE m.lead_id = l.id AND m.direction = 'in')`);
     const { rows } = await this.pool.query(
       `SELECT l.id, l.customer_name, l.destination, COALESCE(NULLIF(l.whatsapp_number, ''), l.phone) AS raw
@@ -337,7 +356,7 @@ export class BroadcastsService implements OnModuleInit {
     };
   }
 
-  async create(input: { name: string; contentSid: string; variables: Record<string, VariableSource>; audience: Audience }, userId: string | null) {
+  async create(input: { name: string; contentSid: string; variables: Record<string, VariableSource>; audience: Audience; service?: string }, userId: string | null) {
     await this.assertReady();
     const twilio = this.provider() === 'twilio';
     const name = String(input.name || '').trim();
@@ -349,6 +368,8 @@ export class BroadcastsService implements OnModuleInit {
       if (!src || !['name', 'destination', 'text'].includes(src.source)) throw new BadRequestException(`Choose what goes in {{${v.number}}}`);
       if (src.source === 'text' && !String(src.value || '').trim()) throw new BadRequestException(`Type the text for {{${v.number}}}`);
     }
+    if (!SERVICES.includes(String(input.service))) throw new BadRequestException('Choose what this promo is about: tickets, visa, package or other');
+    await this.setTemplateService(template.name, String(input.service));
     const found = await this.audience(input.audience || {});
     if (!found.recipients.length) throw new BadRequestException('No one to send to with these filters');
     const cost = found.recipients.reduce((sum, r) => sum + metaRate(template.category, r.phone) + (twilio ? TWILIO_FEE : 0), 0);
@@ -356,9 +377,9 @@ export class BroadcastsService implements OnModuleInit {
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        `INSERT INTO whatsapp_broadcasts (name, content_sid, template_name, template_body, variables, audience, status, total, estimated_cost, currency, created_by, provider, template_language)
-         VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7, $8, 'USD', $9, $10, $11) RETURNING id`,
-        [name, template.sid, template.name, template.body, JSON.stringify(input.variables), JSON.stringify(input.audience || {}), found.recipients.length, Math.round(cost * 100) / 100, userId, this.provider(), template.language],
+        `INSERT INTO whatsapp_broadcasts (name, content_sid, template_name, template_body, variables, audience, status, total, estimated_cost, currency, created_by, provider, template_language, service)
+         VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7, $8, 'USD', $9, $10, $11, $12) RETURNING id`,
+        [name, template.sid, template.name, template.body, JSON.stringify(input.variables), JSON.stringify(input.audience || {}), found.recipients.length, Math.round(cost * 100) / 100, userId, this.provider(), template.language, input.service],
       );
       const id = rows[0].id;
       for (let i = 0; i < found.recipients.length; i += 500) {
@@ -472,7 +493,7 @@ export class BroadcastsService implements OnModuleInit {
       const text = String(b.template_body || b.template_name).replace(/\{\{(\d+)\}\}/g, (_m: string, k: string) => vars[k] ?? '');
       await this.pool.query(
         `INSERT INTO whatsapp_messages (phone_number, lead_id, direction, msg_type, body, wa_message_id, meta) VALUES ($1, $2, 'out', 'text', $3, $4, $5)`,
-        [r.phone, r.lead_id, text, sid, JSON.stringify({ waId: sid, template: b.template_name, broadcastId: b.id, broadcastName: b.name })],
+        [r.phone, r.lead_id, text, sid, JSON.stringify({ waId: sid, template: b.template_name, broadcastId: b.id, broadcastName: b.name, ...(b.service ? { service: b.service } : {}) })],
       ).catch(() => undefined);
     } catch (e: any) {
       await this.pool.query(`UPDATE whatsapp_broadcast_recipients SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, [r.id, String(e.message || e).slice(0, 300)]);

@@ -11,7 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { tr, locale } from '@/i18n';
 import { uploadPackageDocument } from '@/hooks/use-packages';
-import { BroadcastTemplate, NewTemplateInput, useBroadcastTemplates, useTemplateActions } from '@/hooks/use-broadcasts';
+import { BroadcastTemplate, NewTemplateInput, SERVICE_TYPES, ServiceType, useBroadcastTemplates, useTemplateActions } from '@/hooks/use-broadcasts';
 
 const selectBase = 'h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground';
 const selectClass = selectBase + ' w-full';
@@ -32,12 +32,13 @@ export function TemplateManager({ onUse }: { onUse: (sid: string) => void }) {
   const { toast } = useToast();
   const confirm = useConfirm();
   const templates = useBroadcastTemplates();
-  const { create, remove } = useTemplateActions();
+  const { create, remove, setService } = useTemplateActions();
   const [open, setOpen] = useState(false);
   const [showApproved, setShowApproved] = useState(false);
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState<'MARKETING' | 'UTILITY'>('MARKETING');
+  const [service, setServiceChoice] = useState<ServiceType | ''>('');
   const [language, setLanguage] = useState<'en' | 'fr'>('fr');
   const [body, setBody] = useState('');
   const [samples, setSamples] = useState<string[]>([]);
@@ -63,7 +64,7 @@ export function TemplateManager({ onUse }: { onUse: (sid: string) => void }) {
   const filled = body.replace(/\{\{(\d+)\}\}/g, (m, n: string) => samples[Number(n) - 1]?.trim() || m);
 
   function reset() {
-    setName(''); setCategory('MARKETING'); setLanguage('fr'); setBody(''); setSamples([]); setFooter(''); setButtons([]); setHeader(null);
+    setName(''); setCategory('MARKETING'); setServiceChoice(''); setLanguage('fr'); setBody(''); setSamples([]); setFooter(''); setButtons([]); setHeader(null);
   }
 
   function addBlank() {
@@ -86,7 +87,7 @@ export function TemplateManager({ onUse }: { onUse: (sid: string) => void }) {
 
   async function submit() {
     const input: NewTemplateInput = {
-      name: slug, category, language, body: body.trim(), samples: blanks.map((n) => samples[n - 1].trim()), footer: footer.trim() || undefined,
+      name: slug, category, language, service: service || undefined, body: body.trim(), samples: blanks.map((n) => samples[n - 1].trim()), footer: footer.trim() || undefined,
       buttons: buttons.map((b) => ({ type: b.type, text: b.text.trim(), url: b.url?.trim(), phone: b.phone?.trim() })),
       headerObjectKey: header?.objectKey, headerFileName: header?.fileName,
     };
@@ -108,12 +109,16 @@ export function TemplateManager({ onUse }: { onUse: (sid: string) => void }) {
     return (
       <div key={t.sid} className="flex flex-wrap items-start gap-3 border-b py-2.5 last:border-0">
         <div className="min-w-[12rem] flex-1">
-          <p className="text-sm font-medium">{t.name} <span className="ml-1 text-xs font-normal text-muted-foreground">{tr(t.category === 'UTILITY' ? 'Utility' : 'Marketing')} · {t.language}{t.hasMedia ? ` · ${tr('with file')}` : ''}</span></p>
+          <p className="text-sm font-medium">{t.name} <span className="ml-1 text-xs font-normal text-muted-foreground">{tr(t.category === 'UTILITY' ? 'Utility' : 'Marketing')}{t.service ? ` · ${tr(SERVICE_TYPES.find((x) => x.value === t.service)?.label ?? '')}` : ''} · {t.language}{t.hasMedia ? ` · ${tr('with file')}` : ''}</span></p>
           <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.body}</p>
           {t.status === 'REJECTED' && <p className="mt-1 text-xs font-semibold text-red-600">{tr('WhatsApp said')}: {t.rejectionReason || tr('no reason given')}</p>}
         </div>
         <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${s.style}`}><Icon className="h-3 w-3" />{tr(s.label)}</span>
         <div className="flex shrink-0 items-center gap-1">
+          <select aria-label={tr('This promo is about')} title={tr('This promo is about')} value={t.service ?? ''} onChange={(e) => e.target.value && setService.mutate({ templateName: t.name, service: e.target.value as ServiceType })} className="h-8 rounded-md border border-input bg-background px-1.5 text-xs">
+            <option value="">{tr('About…')}</option>
+            {SERVICE_TYPES.map((s) => <option key={s.value} value={s.value}>{tr(s.label)}</option>)}
+          </select>
           {t.status === 'APPROVED' && <Button size="sm" variant="outline" onClick={() => onUse(t.sid)}>{tr('Use')}</Button>}
           {t.createdHere && <button type="button" onClick={() => del(t)} title={tr('Delete')} aria-label={tr('Delete')} className="rounded p-1.5 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>}
         </div>
@@ -145,6 +150,11 @@ export function TemplateManager({ onUse }: { onUse: (sid: string) => void }) {
                 <div><Label>{tr('Language')}</Label>
                   <select className={`${selectClass} mt-1`} value={language} onChange={(e) => setLanguage(e.target.value as 'en' | 'fr')}>
                     <option value="fr">Français</option><option value="en">English</option>
+                  </select></div>
+                <div className="sm:col-span-3"><Label>{tr('This promo is about')}</Label>
+                  <select className={`${selectClass} mt-1`} value={service} onChange={(e) => setServiceChoice(e.target.value as ServiceType | '')}>
+                    <option value="">{tr('Decide when sending')}</option>
+                    {SERVICE_TYPES.map((s) => <option key={s.value} value={s.value}>{tr(s.label)}</option>)}
                   </select></div>
               </div>
 

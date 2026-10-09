@@ -17,11 +17,15 @@ export class BroadcastsController {
   @Post('templates')
   createTemplate(@Body() body: NewTemplate) { return this.broadcasts.createTemplate(body); }
 
+  // What a promo template is about (tickets, visa, package, other).
+  @Post('templates/service')
+  templateService(@Body() body: { templateName: string; service: string }) { return this.broadcasts.setTemplateService(String(body?.templateName || ''), String(body?.service || '')); }
+
   @Delete('templates/:sid')
   deleteTemplate(@Param('sid') sid: string) { return this.broadcasts.deleteTemplate(sid); }
 
   @Post('test')
-  testSend(@Body() body: { contentSid: string; variables: Record<string, VariableSource>; phone: string }) { return this.broadcasts.testSend(body); }
+  testSend(@Body() body: { contentSid: string; variables: Record<string, VariableSource>; phone: string; service?: string }) { return this.broadcasts.testSend(body); }
 
   @Get('test/:sid')
   testStatus(@Param('sid') sid: string) { return this.broadcasts.testStatus(sid); }
@@ -36,7 +40,7 @@ export class BroadcastsController {
   list() { return this.broadcasts.list(); }
 
   @Post()
-  create(@Body() body: { name: string; contentSid: string; variables: Record<string, VariableSource>; audience: Audience }, @Req() req: any) {
+  create(@Body() body: { name: string; contentSid: string; variables: Record<string, VariableSource>; audience: Audience; service?: string }, @Req() req: any) {
     return this.broadcasts.create(body, req.user?.userId ?? null);
   }
 

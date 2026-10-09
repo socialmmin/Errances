@@ -198,4 +198,19 @@ export const part8: Record<string, string> = {
   "Billing": "Facturation",
   "Charged by Meta to the payment method on your WhatsApp account": "Facturé par Meta sur le moyen de paiement de votre compte WhatsApp",
   "approximate — WhatsApp fee for a {category} template": "approximatif — frais WhatsApp pour un modèle {category}",
+
+  // Tickets / visa / package
+  "Flight tickets": "Billets d'avion",
+  "Visa": "Visa",
+  "Holiday package": "Séjour / circuit",
+  "Other": "Autre",
+  "Ticket": "Billets",
+  "Package": "Séjour / circuit",
+  "This promo is about": "Cette offre concerne",
+  "A customer who answers this promo is asked only the questions for it — e.g. no \"family or friends?\" for a ticket offer.": "Un client qui répond à cette offre ne reçoit que les questions qui s'y rapportent — par ex. pas de « en famille ou entre amis ? » pour une offre de billets.",
+  "Asked us for": "Demande reçue pour",
+  "Decide when sending": "Choisir lors de l'envoi",
+  "About…": "Concerne…",
+  "Asked for": "Demande",
+  "Choose what this promo is about: tickets, visa, package or other": "Choisissez ce que concerne l'offre : billets, visa, séjour ou autre",
 };

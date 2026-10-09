@@ -10,14 +10,20 @@ export interface BroadcastTemplate {
   status: TemplateStatus; rejectionReason: string | null; createdAt: string | null;
   // Written on the Bulk WhatsApp page (so it can be deleted there).
   createdHere: boolean;
+  // What the promo is about, once someone has said so.
+  service: ServiceType | null;
 }
+export type ServiceType = 'ticket' | 'visa' | 'package' | 'other';
+export const SERVICE_TYPES: { value: ServiceType; label: string }[] = [
+  { value: 'ticket', label: 'Flight tickets' }, { value: 'visa', label: 'Visa' }, { value: 'package', label: 'Holiday package' }, { value: 'other', label: 'Other' },
+];
 export interface NewTemplateInput {
   name: string; category: 'MARKETING' | 'UTILITY'; language: 'en' | 'fr'; body: string; samples: string[]; footer?: string;
   buttons?: { type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'; text: string; url?: string; phone?: string }[];
-  headerObjectKey?: string; headerFileName?: string;
+  headerObjectKey?: string; headerFileName?: string; service?: ServiceType;
 }
 export interface BroadcastAudience {
-  statuses?: string[]; sources?: string[]; destination?: string; assignedTo?: string[]; createdFrom?: string; createdTo?: string; onlyChatted?: boolean;
+  statuses?: string[]; sources?: string[]; destination?: string; assignedTo?: string[]; createdFrom?: string; createdTo?: string; onlyChatted?: boolean; services?: string[];
 }
 export type BroadcastVariable = { source: 'name' | 'destination' | 'text'; value?: string };
 export interface BroadcastPreview {
@@ -54,12 +60,13 @@ export function useTemplateActions() {
   const refresh = () => qc.invalidateQueries({ queryKey: ['broadcasts', 'templates'] });
   const create = useMutation({ mutationFn: (input: NewTemplateInput) => api.post<{ sid: string; name: string; status: TemplateStatus }>('/broadcasts/templates', input), onSuccess: refresh });
   const remove = useMutation({ mutationFn: (sid: string) => api.delete(`/broadcasts/templates/${sid}`), onSuccess: refresh });
-  return { create, remove };
+  const setService = useMutation({ mutationFn: (v: { templateName: string; service: ServiceType }) => api.post('/broadcasts/templates/service', v), onSuccess: refresh });
+  return { create, remove, setService };
 }
 
 export function useTestSend() {
   return useMutation({
-    mutationFn: (input: { contentSid: string; variables: Record<string, BroadcastVariable>; phone: string }) => api.post<{ sid: string; to: string; leadId: string | null }>('/broadcasts/test', input),
+    mutationFn: (input: { contentSid: string; variables: Record<string, BroadcastVariable>; phone: string; service?: ServiceType }) => api.post<{ sid: string; to: string; leadId: string | null }>('/broadcasts/test', input),
   });
 }
 
@@ -76,7 +83,7 @@ export function useTestStatus(sid: string | null) {
 export function useBroadcastFilters() {
   return useQuery({
     queryKey: ['broadcasts', 'filters'],
-    queryFn: () => api.get<{ statuses: { v: string; n: number }[]; sources: { v: string; n: number }[]; users: { id: string; full_name: string }[] }>('/broadcasts/filters'),
+    queryFn: () => api.get<{ statuses: { v: string; n: number }[]; sources: { v: string; n: number }[]; users: { id: string; full_name: string }[]; services: { v: string; n: number }[] }>('/broadcasts/filters'),
   });
 }
 
@@ -109,7 +116,7 @@ export function useBroadcastActions() {
   const qc = useQueryClient();
   const refresh = () => qc.invalidateQueries({ queryKey: ['broadcasts'] });
   const create = useMutation({
-    mutationFn: (input: { name: string; contentSid: string; variables: Record<string, BroadcastVariable>; audience: BroadcastAudience }) => api.post<BroadcastDetail>('/broadcasts', input),
+    mutationFn: (input: { name: string; contentSid: string; variables: Record<string, BroadcastVariable>; audience: BroadcastAudience; service: ServiceType }) => api.post<BroadcastDetail>('/broadcasts', input),
     onSuccess: refresh,
   });
   const act = useMutation({ mutationFn: (v: { id: string; action: 'pause' | 'resume' | 'cancel' }) => api.post(`/broadcasts/${v.id}/${v.action}`, {}), onSuccess: refresh });

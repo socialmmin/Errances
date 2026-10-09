@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { tr, locale } from '@/i18n';
 import {
-  BroadcastAudience, BroadcastRow, BroadcastVariable, useBroadcast, useBroadcastActions, useBroadcastFilters, useBroadcastPreview, useBroadcasts, useBroadcastTemplates,
+  BroadcastAudience, BroadcastRow, BroadcastVariable, SERVICE_TYPES, ServiceType, useBroadcast, useBroadcastActions, useBroadcastFilters, useBroadcastPreview, useBroadcasts, useBroadcastTemplates,
 } from '@/hooks/use-broadcasts';
 import { TemplateManager } from '@/components/broadcasts/template-manager';
 import { TestSend } from '@/components/broadcasts/test-send';
@@ -60,6 +60,8 @@ export default function BulkWhatsAppPage() {
   const [audience, setAudience] = useState<BroadcastAudience>({});
   const [destination, setDestination] = useState('');
   const [name, setName] = useState('');
+  // What the promo is about: a customer answering it is only asked the questions for that.
+  const [service, setService] = useState<ServiceType | ''>('');
   const [openId, setOpenId] = useState<string | null>(null);
 
   // The destination box filters as you pause typing, not on every key.
@@ -82,6 +84,7 @@ export default function BulkWhatsAppPage() {
     // The first variable in a message is nearly always the customer's name.
     for (const v of t?.variables ?? []) next[String(v.number)] = v.inBody && v.number === 1 ? { source: 'name' } : { source: 'text', value: v.inBody ? '' : v.sample };
     setVariables(next);
+    setService(t?.service ?? '');
   }
 
   const filled = (template?.body ?? '').replace(/\{\{(\d+)\}\}/g, (_m, n: string) => {
@@ -97,7 +100,7 @@ export default function BulkWhatsAppPage() {
   const missingText = !!template && template.variables.some((v) => variables[String(v.number)]?.source === 'text' && !variables[String(v.number)]?.value?.trim());
   const overLimit = !!p && p.dailyLimit !== null && p.count > Math.max(Math.floor(p.dailyLimit * 0.9) - p.usedLast24h, 0);
   const lowBalance = !!p?.balance && p.balance.amount < p.estimate.total;
-  const canSend = !!template && !!name.trim() && !!p?.count && !missingText && !create.isPending;
+  const canSend = !!template && !!service && !!name.trim() && !!p?.count && !missingText && !create.isPending;
 
   async function send() {
     if (!template || !p) return;
@@ -108,7 +111,7 @@ export default function BulkWhatsAppPage() {
     });
     if (!ok) return;
     try {
-      const made = await create.mutateAsync({ name: name.trim(), contentSid, variables, audience });
+      const made = await create.mutateAsync({ name: name.trim(), contentSid, variables, audience, service: service as ServiceType });
       toast(tr('Bulk send started'), 'success');
       setName(''); setOpenId(made.id);
     } catch (e: any) { toast(e.message || tr('Could not start the bulk send'), 'error'); }
@@ -153,6 +156,19 @@ export default function BulkWhatsAppPage() {
               {!templates.isLoading && !approved.length && !templates.isError && <p className="mt-1 text-xs text-muted-foreground">{tr('No approved template yet. Templates are approved by WhatsApp before they can be sent in bulk.')}</p>}
             </div>
 
+            {template && (
+              <div>
+                <Label>{tr('This promo is about')}</Label>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {SERVICE_TYPES.map((s) => (
+                    <button key={s.value} type="button" onClick={() => setService(s.value)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${service === s.value ? 'border-navy bg-navy text-white' : 'border-border bg-white text-foreground hover:bg-muted'}`}>{tr(s.label)}</button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">{tr('A customer who answers this promo is asked only the questions for it — e.g. no "family or friends?" for a ticket offer.')}</p>
+              </div>
+            )}
+
             {template && template.variables.length > 0 && (
               <div className="space-y-2">
                 <Label>{tr('What goes in each blank')}</Label>
@@ -179,6 +195,8 @@ export default function BulkWhatsAppPage() {
               <Label>{tr('2. Who receives it')}</Label>
               <p className="mt-2 text-xs font-semibold text-muted-foreground">{tr('Lead status')} <span className="font-normal">({tr('none selected = everyone except lost, not interested, invalid and duplicate leads')})</span></p>
               <Chips options={filters.data?.statuses ?? []} value={audience.statuses ?? []} onChange={(v) => setAudience((a) => ({ ...a, statuses: v.length ? v : undefined }))} />
+              {!!filters.data?.services?.length && <><p className="mt-3 text-xs font-semibold text-muted-foreground">{tr('Asked us for')}</p>
+              <Chips options={filters.data.services} value={audience.services ?? []} onChange={(v) => setAudience((a) => ({ ...a, services: v.length ? v : undefined }))} /></>}
               <p className="mt-3 text-xs font-semibold text-muted-foreground">{tr('Lead source')}</p>
               <Chips options={filters.data?.sources ?? []} value={audience.sources ?? []} onChange={(v) => setAudience((a) => ({ ...a, sources: v.length ? v : undefined }))} />
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -220,7 +238,7 @@ export default function BulkWhatsAppPage() {
                   {!!p.sample.length && <p className="mt-2 text-xs text-muted-foreground">{tr('For example')}: {p.sample.slice(0, 5).map((s) => s.name || `+${s.phone}`).join(', ')}{p.count > 5 ? '…' : ''}</p>}
                 </>
               )}
-              <div className="mt-3"><TestSend contentSid={contentSid} variables={variables} ready={!!template && !missingText} /></div>
+              <div className="mt-3"><TestSend contentSid={contentSid} variables={variables} service={service || undefined} ready={!!template && !missingText} /></div>
               <div className="mt-3"><p className="text-xs font-semibold text-muted-foreground">{tr('Name for this bulk send (only you see it)')}</p><Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('e.g. Summer offer - June')} maxLength={80} /></div>
               {missingText && <p className="mt-2 text-xs font-semibold text-red-600">{tr('Fill in every blank of the template first.')}</p>}
               <Button variant="gold" className="mt-3 w-full" disabled={!canSend} onClick={send}><Send className="mr-2 h-4 w-4" />{create.isPending ? tr('Starting…') : tr('Send to {n} customers', { n: p?.count ?? 0 })}</Button>

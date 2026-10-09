@@ -20,6 +20,8 @@ export interface Lead {
   priority: string;
   source: string | null;
   nationality: string | null;
+  // What the lead asked for on WhatsApp: ticket | visa | package | other.
+  service_type?: string | null;
   infants: number;
   budget: number | null;
   travel_type: string | null;
