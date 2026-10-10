@@ -102,6 +102,8 @@ const T = {
     thanks: (name: string) => (name ? `Merci ${name} ! ` : 'Merci ! ') + 'Voici votre demande :',
     labels: { service: 'Demande', route: 'Trajet', destination: 'Destination', visaCountry: 'Visa pour', nationality: 'Nationalité', dates: 'Dates', travellers: 'Voyageurs', passengers: 'Passagers', type: 'Type de voyage', details: 'Détails', promo: 'Offre' },
     closing: 'Un conseiller Errances Voyages vous contactera très vite ici. Vous pouvez ajouter d’autres précisions dans ce chat.',
+    // Last line of the summary: for anyone who cannot wait for the call.
+    urgent: { ticket: 'Besoin d’un billet en urgence ? Réservez directement sur notre site : www.errancesvoyages.com', other: 'Besoin d’une réservation urgente ? Réservez directement sur notre site : www.errancesvoyages.com' },
     callButton: 'Être rappelé(e)',
     serviceSection: 'Votre demande',
     section: 'Type de voyage',
@@ -135,6 +137,7 @@ const T = {
     thanks: (name: string) => (name ? `Thank you ${name}! ` : 'Thank you! ') + 'Here is your request:',
     labels: { service: 'Request', route: 'Route', destination: 'Destination', visaCountry: 'Visa for', nationality: 'Nationality', dates: 'Dates', travellers: 'Travellers', passengers: 'Passengers', type: 'Type of trip', details: 'Details', promo: 'Offer' },
     closing: 'An Errances Voyages travel consultant will contact you here very soon. You can add any other details in this chat.',
+    urgent: { ticket: 'Need a ticket urgently? Book directly on our website: www.errancesvoyages.com', other: 'Need to book urgently? Book directly on our website: www.errancesvoyages.com' },
     callButton: 'Call me back',
     serviceSection: 'Your request',
     section: 'Type of trip',
@@ -328,7 +331,8 @@ export function answerLines(state: EnquiryState, lang: EnquiryLang): string[] {
 export function summaryText(state: EnquiryState, name: string) {
   const t = T[state.lang];
   const lines = answerLines(state, state.lang).map((line) => { const i = line.indexOf(': '); return `• *${line.slice(0, i)}* : ${line.slice(i + 2)}`; });
-  return `${t.thanks(name)}\n\n${lines.join('\n')}\n\n${t.closing}`;
+  const urgent = state.service === 'ticket' ? t.urgent.ticket : t.urgent.other;
+  return `${t.thanks(name)}\n\n${lines.join('\n')}\n\n${t.closing}\n\n${urgent}`;
 }
 
 // One line for the sales team (always English, like the rest of the staff alerts).
