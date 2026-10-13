@@ -372,9 +372,9 @@ export class LeadsRepository {
          travel_from, travel_to, adults, children, infants, budget, travel_type, source,
          assigned_to, priority, status, expected_revenue, remarks,
          whatsapp_contact_id, whatsapp_status, campaign_name, ad_name, lead_month, lead_year, meta_attribution,
-         branch_id, created_by)
+         branch_id, created_by, date_of_birth, passport_number, passport_expiry, passport_country)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
        RETURNING *`,
       [
         leadNumber,
@@ -406,6 +406,10 @@ export class LeadsRepository {
         dto.metaAttribution ? JSON.stringify(dto.metaAttribution) : null,
         dto.branchId,
         createdBy,
+        dto.dateOfBirth ?? null,
+        dto.passportNumber?.trim() || null,
+        dto.passportExpiry ?? null,
+        dto.passportCountry?.trim() || null,
       ],
     );
     return rows[0];
@@ -470,6 +474,10 @@ export class LeadsRepository {
       whatsapp_number: dto.whatsappNumber,
       email: dto.email,
       nationality: dto.nationality,
+      date_of_birth: dto.dateOfBirth,
+      passport_number: dto.passportNumber,
+      passport_expiry: dto.passportExpiry,
+      passport_country: dto.passportCountry,
       destination: dto.destination,
       travel_from: dto.travelFrom,
       travel_to: dto.travelTo,

@@ -13,6 +13,7 @@ import {
   BroadcastAudience, BroadcastRow, BroadcastVariable, SERVICE_TYPES, ServiceType, useBroadcast, useBroadcastActions, useBroadcastFilters, useBroadcastPreview, useBroadcasts, useBroadcastTemplates,
 } from '@/hooks/use-broadcasts';
 import { TemplateManager } from '@/components/broadcasts/template-manager';
+import { BirthdayCard } from '@/components/broadcasts/birthday-card';
 import { TestSend } from '@/components/broadcasts/test-send';
 import { PackagesSectionTabs } from '@/components/packages/section-tabs';
 
@@ -139,6 +140,8 @@ export default function BulkWhatsAppPage() {
           <Card><CardContent className="p-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tr('Opted out (STOP)')}</p><p className="mt-1 text-xl font-bold">{p.optedOut}</p><p className="text-xs text-muted-foreground">{tr('Left out of every bulk send automatically')}</p></CardContent></Card>
         </div>
       )}
+
+      <BirthdayCard />
 
       <TemplateManager onUse={(sid) => { chooseTemplate(sid); sendRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
 

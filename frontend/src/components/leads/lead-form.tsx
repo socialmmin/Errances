@@ -29,6 +29,10 @@ export function LeadForm({ lead }: { lead?: Lead }) {
     whatsappNumber: lead?.whatsapp_number ?? '',
     email: lead?.email ?? '',
     nationality: lead?.nationality ?? '',
+    dateOfBirth: lead?.date_of_birth?.slice(0, 10) ?? '',
+    passportNumber: lead?.passport_number ?? '',
+    passportExpiry: lead?.passport_expiry?.slice(0, 10) ?? '',
+    passportCountry: lead?.passport_country ?? '',
     destination: lead?.destination ?? '',
     travelFrom: lead?.travel_from ?? '',
     travelTo: lead?.travel_to ?? '',
@@ -106,6 +110,22 @@ export function LeadForm({ lead }: { lead?: Lead }) {
           <div className="space-y-1">
             <Label htmlFor="nationality">Nationality</Label>
             <Input id="nationality" value={form.nationality} onChange={(e) => set('nationality', e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="dateOfBirth">Date of birth</Label>
+            <Input id="dateOfBirth" type="date" max={new Date().toISOString().slice(0, 10)} value={form.dateOfBirth ?? ''} onChange={(e) => set('dateOfBirth', e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="passportNumber">Passport number</Label>
+            <Input id="passportNumber" value={form.passportNumber ?? ''} maxLength={30} autoComplete="off" onChange={(e) => set('passportNumber', e.target.value.toUpperCase())} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="passportExpiry">Passport expiry</Label>
+            <Input id="passportExpiry" type="date" value={form.passportExpiry ?? ''} onChange={(e) => set('passportExpiry', e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="passportCountry">Passport country</Label>
+            <Input id="passportCountry" value={form.passportCountry ?? ''} maxLength={80} onChange={(e) => set('passportCountry', e.target.value)} />
           </div>
         </div>
       </section>

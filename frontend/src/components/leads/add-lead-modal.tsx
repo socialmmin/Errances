@@ -142,6 +142,10 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
   const [whatsappCountry, setWhatsappCountry] = useState('33');
   const [email, setEmail] = useState('');
   const [nationality, setNationality] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [passportNumber, setPassportNumber] = useState('');
+  const [passportExpiry, setPassportExpiry] = useState('');
+  const [passportCountry, setPassportCountry] = useState('');
   const [destinations, setDestinations] = useState<string[]>([]);
   const [travelFrom, setTravelFrom] = useState('');
   const [travelTo, setTravelTo] = useState('');
@@ -166,7 +170,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
     setStep(1);
     setFirstName(''); setLastName(''); setPhone(''); setWhatsappSame(true); setWhatsappNumber('');
     setPhoneCountry('33'); setWhatsappCountry('33');
-    setEmail(''); setNationality(''); setDestinations([]); setTravelFrom(''); setTravelTo('');
+    setEmail(''); setNationality(''); setDateOfBirth(''); setPassportNumber(''); setPassportExpiry(''); setPassportCountry(''); setDestinations([]); setTravelFrom(''); setTravelTo('');
     setAdults(1); setChildren(0); setInfants(0); setBudget(0); setTravelType('');
     setSource('meta_ads'); setPriority('cold'); setAssignedTo(currentUserId); setRemarks('');
   }
@@ -178,6 +182,10 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
       whatsappNumber: fullWhatsapp || fullPhone || undefined,
       email: email.trim() || undefined,
       nationality: nationality.trim() || undefined,
+      dateOfBirth: dateOfBirth || undefined,
+      passportNumber: passportNumber.trim().toUpperCase() || undefined,
+      passportExpiry: passportExpiry || undefined,
+      passportCountry: passportCountry.trim() || undefined,
       destination: destinations.join(', '),
       travelFrom: travelFrom || undefined,
       travelTo: travelTo || undefined,
@@ -269,6 +277,12 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
               </button>
               {!whatsappSame && <div className="space-y-1"><FieldLabel icon={MessageCircle}>WhatsApp Number</FieldLabel><div className="flex gap-2"><CountryCode value={whatsappCountry} onChange={setWhatsappCountry} /><Input className={inputClass} value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} inputMode="tel" placeholder={PHONE_COUNTRIES.find((c) => c.code === whatsappCountry)?.example} /></div>{whatsappNumber.trim() && !fullWhatsapp && <p className="text-[11px] font-semibold text-red-600">Not a valid WhatsApp number</p>}</div>}
               <div className="space-y-1"><FieldLabel icon={Globe2}>Nationality</FieldLabel><Input className={inputClass} value={nationality} onChange={(e) => setNationality(e.target.value)} placeholder="e.g. French, Belgian, British" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1"><FieldLabel icon={CalendarDays}>Date of birth</FieldLabel><Input className={inputClass} type="date" max={new Date().toISOString().slice(0, 10)} value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} /><p className="text-[11px] text-muted-foreground">For a WhatsApp birthday greeting</p></div>
+                <div className="space-y-1"><FieldLabel icon={Globe2}>Passport number</FieldLabel><Input className={inputClass} value={passportNumber} onChange={(e) => setPassportNumber(e.target.value)} maxLength={30} placeholder="e.g. 21AB12345" autoComplete="off" /></div>
+                <div className="space-y-1"><FieldLabel icon={CalendarDays}>Passport expiry</FieldLabel><Input className={inputClass} type="date" value={passportExpiry} onChange={(e) => setPassportExpiry(e.target.value)} /></div>
+                <div className="space-y-1"><FieldLabel icon={Globe2}>Passport country</FieldLabel><Input className={inputClass} value={passportCountry} onChange={(e) => setPassportCountry(e.target.value)} maxLength={80} placeholder="e.g. France" /></div>
+              </div>
             </div>
           )}
 

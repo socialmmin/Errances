@@ -5,6 +5,7 @@ import { ApprovedTemplate, TwilioWhatsAppService } from '../integrations/whatsap
 import { MetaWhatsAppService } from '../integrations/whatsapp/meta-whatsapp.service';
 import { waNumber } from '../integrations/whatsapp/whatsapp-bot.service';
 import { R2Service } from '../../common/r2/r2.service';
+import { detectLanguage } from '../integrations/whatsapp/enquiry-flow';
 
 export interface Audience {
   statuses?: string[];
@@ -20,6 +21,20 @@ export interface Audience {
 }
 // Where each template variable's value comes from, per recipient.
 const SERVICES = ['ticket', 'visa', 'package', 'other'];
+
+// The birthday greeting, as submitted to WhatsApp for approval. {{1}} is the customer's first name
+// (or noName when the lead has none).
+const BIRTHDAY_TEMPLATES = {
+  fr: {
+    name: 'errances_birthday_fr', sample: 'Claire', noName: 'à vous',
+    body: "Joyeux anniversaire {{1}} ! 🎂🎉\n\nToute l'équipe d'Errances Voyages vous souhaite une merveilleuse journée, entourée de ceux que vous aimez, et une nouvelle année riche en beaux voyages et en belles découvertes. ✈️🌍\n\nAvec toutes nos amitiés,\nL'équipe Errances Voyages",
+  },
+  en: {
+    name: 'errances_birthday_en', sample: 'Claire', noName: 'to you',
+    body: 'Happy birthday {{1}}! 🎂🎉\n\nThe whole Errances Voyages team wishes you a wonderful day with the people you love, and a new year full of beautiful journeys and discoveries. ✈️🌍\n\nWarm wishes,\nThe Errances Voyages team',
+  },
+};
+
 export type VariableSource = { source: 'name' | 'destination' | 'text'; value?: string };
 // A template written on the Bulk WhatsApp page, before it is submitted to WhatsApp.
 export interface NewTemplate {
@@ -70,6 +85,13 @@ export class BroadcastsService implements OnModuleInit {
       this.ticking = true;
       this.tick().catch((e) => this.logger.error(`Bulk send tick failed: ${e.message}`)).finally(() => { this.ticking = false; });
     }, 3000);
+    // Birthday greetings: checked every ten minutes (see sendBirthdays).
+    let greeting = false;
+    setInterval(() => {
+      if (greeting) return;
+      greeting = true;
+      this.sendBirthdays().catch((e) => this.logger.error(`Birthday greetings failed: ${e.message}`)).finally(() => { greeting = false; });
+    }, 10 * 60 * 1000);
   }
 
   private provider() { return this.twilio.activeProvider(); }
@@ -439,6 +461,119 @@ export class BroadcastsService implements OnModuleInit {
     if (!rowCount) throw new BadRequestException(`This bulk send cannot be ${action === 'cancel' ? 'cancelled' : action + 'd'} now`);
     if (action === 'cancel') await this.pool.query(`UPDATE whatsapp_broadcast_recipients SET status = 'skipped', error = 'Cancelled', updated_at = now() WHERE broadcast_id = $1 AND status = 'queued'`, [id]);
     return this.get(id);
+  }
+
+  // ---------------------------------------------------------------- birthday greetings
+
+  // The approved birthday templates (French and English), by language.
+  private async birthdayTemplates() {
+    const all = await this.allTemplates().catch(() => [] as ApprovedTemplate[]);
+    const pick = (name: string) => all.find((t) => t.name === name) ?? null;
+    return { fr: pick(BIRTHDAY_TEMPLATES.fr.name), en: pick(BIRTHDAY_TEMPLATES.en.name) };
+  }
+
+  // What the Bulk WhatsApp page shows: on/off, the two templates and WhatsApp's decision on them,
+  // whose birthday is today and in the coming week, and the greetings already sent.
+  async birthdayStatus() {
+    const [{ rows: settings }, templates, { rows: upcoming }, { rows: recent }] = await Promise.all([
+      this.pool.query(`SELECT birthday_greetings FROM whatsapp_automation_settings WHERE id = true`),
+      this.birthdayTemplates(),
+      this.pool.query(
+        `SELECT id, customer_name, date_of_birth::text AS dob, COALESCE(NULLIF(whatsapp_number, ''), phone) AS phone, d.days
+           FROM leads, LATERAL (SELECT ((make_date(EXTRACT(YEAR FROM now() AT TIME ZONE 'Europe/Paris')::int + y, EXTRACT(MONTH FROM date_of_birth)::int,
+                    LEAST(EXTRACT(DAY FROM date_of_birth)::int, CASE WHEN EXTRACT(MONTH FROM date_of_birth) = 2 THEN 28 ELSE 31 END))
+                  - (now() AT TIME ZONE 'Europe/Paris')::date)) AS days FROM generate_series(0, 1) y) d
+          WHERE date_of_birth IS NOT NULL AND is_deleted = false AND d.days BETWEEN 0 AND 7
+          ORDER BY d.days, customer_name LIMIT 50`),
+      this.pool.query(
+        `SELECT g.phone, g.status, g.error, g.created_at, l.customer_name FROM birthday_greetings g LEFT JOIN leads l ON l.id = g.lead_id
+          ORDER BY g.created_at DESC LIMIT 20`),
+    ]);
+    const brief = (t: ApprovedTemplate | null) => (t ? { name: t.name, status: t.status, rejectionReason: t.rejectionReason } : null);
+    return {
+      enabled: settings[0]?.birthday_greetings !== false,
+      templates: { fr: brief(templates.fr), en: brief(templates.en) },
+      upcoming: upcoming.map((r) => ({ leadId: r.id, name: r.customer_name, dateOfBirth: r.dob, inDays: r.days, hasWhatsApp: !!waNumber(r.phone) })),
+      recent,
+    };
+  }
+
+  async setBirthdayGreetings(enabled: boolean, userId: string | null) {
+    await this.pool.query(`UPDATE whatsapp_automation_settings SET birthday_greetings = $1, updated_at = now(), updated_by = $2 WHERE id = true`, [!!enabled, userId]);
+    return this.birthdayStatus();
+  }
+
+  // Writes the French and English birthday templates and submits them to WhatsApp (a birthday
+  // greeting goes out without the customer writing first, so WhatsApp must approve its wording).
+  async createBirthdayTemplates() {
+    await this.assertReady();
+    const existing = await this.birthdayTemplates();
+    const made: string[] = [];
+    for (const lang of ['fr', 'en'] as const) {
+      if (existing[lang] && existing[lang]!.status !== 'REJECTED') continue;
+      const def = BIRTHDAY_TEMPLATES[lang];
+      await this.createTemplate({ name: def.name, category: 'MARKETING', language: lang, body: def.body, samples: [def.sample] });
+      made.push(def.name);
+    }
+    return { submitted: made, status: await this.birthdayStatus() };
+  }
+
+  // Sends today's greetings, once per number per year, between 9:00 and 20:00 Paris time, in the
+  // customer's language (French for French-speaking countries, else English), through whichever
+  // provider is on. Waits quietly while the templates are not approved yet.
+  private async sendBirthdays() {
+    const { rows: s } = await this.pool.query(`SELECT birthday_greetings FROM whatsapp_automation_settings WHERE id = true`);
+    if (s[0]?.birthday_greetings === false) return;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date()).map((p) => [p.type, p.value]));
+    const hour = Number(parts.hour);
+    if (hour < 9 || hour >= 20) return;
+    if (this.provider() === 'meta' && !(await this.meta.connection())) return;
+    const templates = await this.birthdayTemplates();
+    const ready = { fr: templates.fr?.status === 'APPROVED' ? templates.fr : null, en: templates.en?.status === 'APPROVED' ? templates.en : null };
+    if (!ready.fr && !ready.en) return;
+
+    const year = Number(parts.year);
+    const today = `${parts.month}-${parts.day}`;
+    // Born on 29 February: greeted on the 28th when the year has no 29th.
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    const days = today === '02-28' && !leap ? ['02-28', '02-29'] : [today];
+    const { rows } = await this.pool.query(
+      `SELECT l.id, l.customer_name, COALESCE(NULLIF(l.whatsapp_number, ''), l.phone) AS raw
+         FROM leads l
+        WHERE l.date_of_birth IS NOT NULL AND l.is_deleted = false AND to_char(l.date_of_birth, 'MM-DD') = ANY($1)
+          AND l.status::text NOT IN ('invalid_number', 'duplicate')
+        ORDER BY l.created_at LIMIT 200`, [days]);
+    let sent = 0;
+    for (const r of rows) {
+      if (sent >= 20) break; // a few per pass; the rest go on the next pass ten minutes later
+      const phone = waNumber(r.raw);
+      if (!phone) continue;
+      const { rows: stop } = await this.pool.query(`SELECT 1 FROM whatsapp_opt_outs WHERE phone = $1`, [phone]);
+      if (stop.length) continue;
+      // Claimed first: a restart or a second lead with the same number can never send it twice.
+      const { rows: claim } = await this.pool.query(
+        `INSERT INTO birthday_greetings (lead_id, phone, year, status) VALUES ($1, $2, $3, 'sending') ON CONFLICT (phone, year) DO NOTHING RETURNING id`, [r.id, phone, year]);
+      if (!claim.length) continue;
+      const lang = detectLanguage('', phone);
+      const template = ready[lang] ?? ready.fr ?? ready.en!;
+      const tLang = template === ready.fr ? 'fr' : 'en';
+      const first = String(r.customer_name || '').trim().split(/\s+/)[0];
+      const name = /\p{L}{2,}/u.test(first) ? first : BIRTHDAY_TEMPLATES[tLang].noName;
+      try {
+        const sid = await this.deliver({ sid: template.sid, name: template.name, language: template.language }, phone, { 1: name });
+        await this.pool.query(`UPDATE birthday_greetings SET status = 'sent', message_sid = $2 WHERE id = $1`, [claim[0].id, sid]);
+        const text = template.body.replace(/\{\{1\}\}/g, name);
+        await this.pool.query(
+          `INSERT INTO whatsapp_messages (phone_number, lead_id, direction, msg_type, body, wa_message_id, meta) VALUES ($1, $2, 'out', 'text', $3, $4, $5)`,
+          [phone, r.id, text, sid, JSON.stringify({ waId: sid, template: template.name, birthday: true })]).catch(() => undefined);
+        sent++;
+        this.logger.log(`Birthday greeting sent to ${phone}`);
+      } catch (e: any) {
+        await this.pool.query(`UPDATE birthday_greetings SET status = 'failed', error = $2 WHERE id = $1`, [claim[0].id, String(e.message || e).slice(0, 300)]);
+        this.logger.warn(`Birthday greeting to ${phone} failed: ${e.message}`);
+      }
+    }
   }
 
   // ---------------------------------------------------------------- sender

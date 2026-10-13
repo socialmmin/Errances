@@ -122,3 +122,23 @@ export function useBroadcastActions() {
   const act = useMutation({ mutationFn: (v: { id: string; action: 'pause' | 'resume' | 'cancel' }) => api.post(`/broadcasts/${v.id}/${v.action}`, {}), onSuccess: refresh });
   return { create, act };
 }
+
+// ---- Birthday greetings (sent automatically on WhatsApp) ----
+export interface BirthdayStatus {
+  enabled: boolean;
+  templates: Record<'fr' | 'en', { name: string; status: TemplateStatus; rejectionReason: string | null } | null>;
+  upcoming: { leadId: string; name: string; dateOfBirth: string; inDays: number; hasWhatsApp: boolean }[];
+  recent: { phone: string; status: string; error: string | null; created_at: string; customer_name: string | null }[];
+}
+
+export function useBirthdays() {
+  return useQuery({ queryKey: ['broadcasts', 'birthdays'], queryFn: () => api.get<BirthdayStatus>('/broadcasts/birthdays'), staleTime: 30_000 });
+}
+
+export function useBirthdayActions() {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: ['broadcasts'] });
+  const toggle = useMutation({ mutationFn: (enabled: boolean) => api.post<BirthdayStatus>('/broadcasts/birthdays', { enabled }), onSuccess: refresh });
+  const submitTemplates = useMutation({ mutationFn: () => api.post<{ submitted: string[] }>('/broadcasts/birthdays/templates', {}), onSuccess: refresh });
+  return { toggle, submitTemplates };
+}

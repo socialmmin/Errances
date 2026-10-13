@@ -321,6 +321,10 @@ export class MetaService implements OnModuleInit {
         details.form_name ? ` — form "${details.form_name}"` : ''
       }`,
       destination: this.extractDestination(details.campaign_name),
+      dateOfBirth: fields.dateOfBirth,
+      passportNumber: fields.passportNumber,
+      passportExpiry: fields.passportExpiry,
+      passportCountry: fields.passportCountry,
       campaignName: details.campaign_name,
       adName: details.ad_name,
       leadMonth: leadDate.getMonth() + 1,
@@ -347,6 +351,10 @@ export class MetaService implements OnModuleInit {
           phone: fields.phone,
           email: fields.email || existingLead.email,
           destination: dto.destination || existingLead.destination,
+          dateOfBirth: fields.dateOfBirth,
+          passportNumber: fields.passportNumber,
+          passportExpiry: fields.passportExpiry,
+          passportCountry: fields.passportCountry,
           campaignName: details.campaign_name || existingLead.campaign_name,
           adName: details.ad_name || existingLead.ad_name,
           leadMonth: dto.leadMonth,
@@ -485,10 +493,20 @@ export class MetaService implements OnModuleInit {
     const lastName = find([/^last_name$/]);
     const fullName = find([/full_name/, /^name$/]) || [firstName, lastName].filter(Boolean).join(' ') || undefined;
 
+    // Meta's own "Date of birth" question answers mm/dd/yyyy; a custom question is read the French
+    // way (dd/mm/yyyy) unless the first number cannot be a month.
+    const dobKey = Object.keys(byName).find((k) => /date_of_birth|^dob$|birth|naissance|anniversaire/.test(k));
+    const expiryKey = Object.keys(byName).find((k) => /(passport|passeport).*(expir|valid)|(expir|valid).*(passport|passeport)/.test(k));
+    const numberKey = Object.keys(byName).find((k) => /passport|passeport/.test(k) && k !== expiryKey && !/country|pays|nationalit/.test(k));
+    const countryKey = Object.keys(byName).find((k) => /(passport|passeport).*(country|pays)|nationalit/.test(k));
     return {
       name: fullName,
       phone: find([/phone/]),
       email: find([/email/]),
+      dateOfBirth: dobKey ? parseFormDate(byName[dobKey], dobKey === 'date_of_birth') : undefined,
+      passportNumber: numberKey ? byName[numberKey].replace(/\s+/g, '').toUpperCase().slice(0, 30) || undefined : undefined,
+      passportExpiry: expiryKey ? parseFormDate(byName[expiryKey], false) : undefined,
+      passportCountry: countryKey ? byName[countryKey].trim().slice(0, 80) || undefined : undefined,
     };
   }
 
@@ -510,4 +528,21 @@ export class MetaService implements OnModuleInit {
     );
     return rows[0]?.id ?? null;
   }
+}
+
+// A date typed in a lead form -> YYYY-MM-DD, or undefined if it is not a real date.
+export function parseFormDate(raw: string, monthFirst: boolean): string | undefined {
+  const t = String(raw || '').trim();
+  let y: number; let m: number; let d: number;
+  let p = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  if (p) { y = +p[1]; m = +p[2]; d = +p[3]; } else {
+    p = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(t);
+    if (!p) return undefined;
+    let a = +p[1]; let b = +p[2];
+    y = +p[3] < 100 ? (+p[3] > 30 ? 1900 : 2000) + +p[3] : +p[3];
+    if (monthFirst && a <= 12) [m, d] = [a, b]; else if (a > 12) [d, m] = [a, b]; else [d, m] = [a, b];
+  }
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d || y < 1900 || y > 2100) return undefined;
+  return date.toISOString().slice(0, 10);
 }

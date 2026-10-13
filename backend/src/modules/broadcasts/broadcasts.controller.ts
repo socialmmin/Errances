@@ -30,6 +30,16 @@ export class BroadcastsController {
   @Get('test/:sid')
   testStatus(@Param('sid') sid: string) { return this.broadcasts.testStatus(sid); }
 
+  // Birthday greetings sent automatically on WhatsApp.
+  @Get('birthdays')
+  birthdays() { return this.broadcasts.birthdayStatus(); }
+
+  @Post('birthdays')
+  setBirthdays(@Body('enabled') enabled: boolean, @Req() req: any) { return this.broadcasts.setBirthdayGreetings(enabled !== false, req.user?.userId ?? null); }
+
+  @Post('birthdays/templates')
+  birthdayTemplates() { return this.broadcasts.createBirthdayTemplates(); }
+
   @Get('filters')
   filters() { return this.broadcasts.filters(); }
 

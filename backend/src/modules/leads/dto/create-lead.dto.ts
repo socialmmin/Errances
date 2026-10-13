@@ -1,4 +1,4 @@
-import { IsDateString, IsEmail, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsDateString, IsEmail, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 const TRAVEL_TYPES = ['family', 'couple', 'solo', 'group', 'corporate', 'honeymoon', 'bachelors', 'students', 'adventure'];
@@ -14,6 +14,11 @@ export class CreateLeadDto {
   @IsOptional() @IsString() whatsappNumber?: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsString() nationality?: string;
+  // Empty strings from the form mean "not given".
+  @IsOptional() @Transform(({ value }) => (value === '' ? undefined : value)) @IsDateString() dateOfBirth?: string;
+  @IsOptional() @IsString() @MaxLength(30) passportNumber?: string;
+  @IsOptional() @Transform(({ value }) => (value === '' ? undefined : value)) @IsDateString() passportExpiry?: string;
+  @IsOptional() @IsString() @MaxLength(80) passportCountry?: string;
   @IsOptional() @IsString() destination?: string;
   @IsOptional() @IsDateString() travelFrom?: string;
   @IsOptional() @IsDateString() travelTo?: string;

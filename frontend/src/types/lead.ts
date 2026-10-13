@@ -20,6 +20,10 @@ export interface Lead {
   priority: string;
   source: string | null;
   nationality: string | null;
+  date_of_birth?: string | null;
+  passport_number?: string | null;
+  passport_expiry?: string | null;
+  passport_country?: string | null;
   // What the lead asked for on WhatsApp: ticket | visa | package | other.
   service_type?: string | null;
   infants: number;
@@ -66,6 +70,10 @@ export interface LeadInput {
   whatsappNumber?: string;
   email?: string;
   nationality?: string;
+  dateOfBirth?: string;
+  passportNumber?: string;
+  passportExpiry?: string;
+  passportCountry?: string;
   destination?: string;
   travelFrom?: string;
   travelTo?: string;
